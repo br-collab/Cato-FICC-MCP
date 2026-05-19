@@ -86,8 +86,8 @@ SEC EDGAR, Blockscout, CoinGecko.
 Requires Node.js 18+.
 
 ```bash
-git clone https://github.com/br-collab/cato-ficc-mcp.git
-cd cato-ficc-mcp
+git clone https://github.com/br-collab/Cato-FICC-MCP.git
+cd Cato-FICC-MCP
 npm install
 ```
 
@@ -100,7 +100,7 @@ Add to your `~/.claude.json` under `mcpServers`:
   "cato": {
     "type": "stdio",
     "command": "node",
-    "args": ["/absolute/path/to/cato-ficc-mcp/index.js"]
+    "args": ["/absolute/path/to/Cato-FICC-MCP/index.js"]
   }
 }
 ```
