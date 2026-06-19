@@ -1,11 +1,12 @@
 {
-  "name": "cato-mcp",
+  "name": "cato-ficc-mcp",
   "version": "0.2.3",
-  "description": "Absolute doctrine for tokenized settlement governance — multi-chain eFICC settlement router for TradFi/DeFi convergence (Ethereum, Base, Arbitrum, Solana, Fed L1 pending). v0.2.3 adds sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
+  "description": "Read-only MCP server for FICC market data — NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR. Advisory use only; no tool routes or settles a trade. v0.2.3 adds sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
   "main": "index.js",
-  "bin": { "cato-mcp": "./index.js" },
+  "bin": { "cato-ficc-mcp": "./index.js" },
   "scripts": { "start": "node index.js" },
-  "keywords": ["mcp", "ficc", "sofr", "treasury", "repo", "tokenization", "atomic-settlement", "defi", "tradfi", "aureon"],
+  "keywords": ["mcp", "ficc", "sofr", "treasury", "repo", "tokenization", "defi", "tradfi", "aureon"],
+  "author": "Guillermo (Bill) Ravelo",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

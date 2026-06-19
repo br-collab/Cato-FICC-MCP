@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Cato MCP Server — v0.2.3
- * Absolute doctrine for tokenized settlement governance.
- * Multi-chain settlement router with live CoinGecko price feeds.
+ * Read-only advisory data layer for tokenized settlement governance.
+ * Multi-chain market data server with live CoinGecko price feeds.
  * v0.2.3 adds a sticky last-known-good price cache so transient
  * CoinGecko failures no longer flip the displayed price to the
  * static $3,500 / $150 constants — the static values are now
@@ -25,7 +25,8 @@
  *   - Solana RPC:    Priority fees, settlement speed
  *   - CoinGecko:     Live ETH and SOL USD prices (v0.2.1)
  *
- * Reference: Duffie (2025) "The Case for PORTS" — Brookings Institution.
+ * Reference: Duffie, D. & Wilson, D. R. (2025), "The case for a new floating rate Treasury note,"
+ *   Brookings Institution (Dec 2025) — proposes Perpetual Overnight Rate Treasury Securities (PORTS).
  */
 
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
@@ -41,8 +42,9 @@ const EDGAR_BASE = "https://data.sec.gov";
 // ── Multi-chain settlement rails (Blockscout + Solana RPC) ───────────────────
 // Each entry is a free public endpoint. Solana is different protocol so it
 // has its own JSON-RPC helper below. "fed_l1" is a documented placeholder —
-// not live. The architecture accommodates tokenized Fed reserves when they
-// arrive (see GENIUS Act, Duffie 2025 PORTS proposal).
+// not live. Tokenized Federal Reserve reserves do not exist and remain hypothetical.
+// The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not
+// central-bank money.
 const BLOCKSCOUT_CHAINS = {
   ethereum: "https://eth.blockscout.com/api/v2/stats",
   base:     "https://base.blockscout.com/api/v2/stats",
@@ -303,7 +305,7 @@ async function multichainGas(prices) {
     },
     fed_l1: {
       status: "not_yet_issued",
-      note: "PORTS — Duffie 2025. Tokenized Fed reserves pending. Monitor GENIUS Act progress.",
+      note: "Non-functional placeholder. Tokenized Federal Reserve reserves do not exist and remain hypothetical. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. Reference: Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025).",
     },
   };
 }
@@ -483,17 +485,17 @@ const TOOLS = [
   },
   {
     name: "get_multichain_gas",
-    description: "Fetch current gas/fee conditions across every supported settlement rail simultaneously: Ethereum mainnet, Base L2, Arbitrum L2, and Solana. Each chain is fetched in parallel and isolated so one slow upstream can never block the others. Includes a documented `fed_l1` placeholder for tokenized Fed reserves (pending GENIUS Act / Duffie 2025 PORTS proposal). Output shape: { ethereum, base, arbitrum, solana, fed_l1 }.",
+    description: "Fetch current gas/fee conditions across every supported settlement rail simultaneously: Ethereum mainnet, Base L2, Arbitrum L2, and Solana. Each chain is fetched in parallel and isolated so one slow upstream can never block the others. Includes a documented `fed_l1` non-functional placeholder (tokenized Fed reserves do not exist; The GENIUS Act, enacted July 2025, governs privately issued payment stablecoins, not central-bank money). Output shape: { ethereum, base, arbitrum, solana, fed_l1 }.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_tokenized_settlement_context",
-    description: "Real-time signal for whether atomic on-chain settlement is viable right now. Combines Blockscout ETH gas price with FRED SOFR and OFR financial stress index. Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50).",
+    description: "Read-only advisory signal on current on-chain settlement conditions. Combines Blockscout ETH gas price with FRED SOFR and OFR financial stress index. Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50). Does not initiate, route, or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "compare_settlement_rails",
-    description: "Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: 0.5bps clearing fee net of 40% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × ETH_PRICE_PROXY. Solana: (base 5000 + median priority) lamports × SOL_PRICE_PROXY. Routing logic respects OFR stress (forces FICC) and gas spikes (forces FICC) before cheapest-cost selection.",
+    description: "Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: 0.5bps clearing fee net of 40% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × ETH_PRICE_PROXY. Solana: (base 5000 + median priority) lamports × SOL_PRICE_PROXY. Advisory ranking logic respects OFR stress (forces FICC) and gas spikes (forces FICC) before cheapest-cost selection. Does not route or settle any trade.",
     inputSchema: { type: "object", properties: {
       notional_usd: { type: "number", description: "Notional trade size in USD" },
       term_days: { type: "number", description: "Settlement term in days (default 1 for overnight repo)", default: 1 }
@@ -501,14 +503,14 @@ const TOOLS = [
   },
   {
     name: "get_atomic_settlement_gate",
-    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_gate for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, and Solana. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei. PROCEED otherwise. Includes a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (PORTS pending, GENIUS Act, CBDC).",
+    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_gate for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, and Solana. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei. PROCEED otherwise. Includes a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (non-functional placeholder; tokenized Fed reserves do not exist; GENIUS Act enacted July 2025 governs privately issued stablecoins). Does not route or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
 
   // ── GOVERNANCE ────────────────────────────────────────────────────────────
   {
     name: "cato_gate",
-    description: "Cato pre-settlement doctrine check — consolidated eFICC governance context for DSOR pre-trade record: SOFR, 10y yield, 2y10y spread, OFR stress index, fed liquidity posture. Single tool that Verana L0 calls before any tokenized settlement proceeds. (Renamed from get_ficc_context.)",
+    description: "Read-only advisory pre-trade check — consolidated eFICC governance context for DSOR pre-trade record: SOFR, 10y yield, 2y10y spread, OFR stress index, fed liquidity posture. Single tool that Verana L0 calls before any tokenized settlement decision. Does not execute, route, or settle any trade. (Renamed from get_ficc_context.)",
     inputSchema: { type: "object", properties: {} }
   }
 ];
@@ -1002,7 +1004,7 @@ async function handleTool(name, args) {
           cost_usd: null,
           speed: "instant",
           status: "not_yet_issued",
-          note: "PORTS — Duffie 2025. Pending GENIUS Act.",
+          note: "Non-functional placeholder. Tokenized Federal Reserve reserves do not exist and remain hypothetical. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. Reference: Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025).",
         },
       };
 
@@ -1067,7 +1069,7 @@ async function handleTool(name, args) {
         ranked,
         recommended_rail,
         doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato v0.2.2 routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional.",
-        fed_l1_note: "Federal Reserve tokenized deposits (reserves) not yet available for on-chain settlement. PORTS (Duffie 2025) proposes sovereign instrument bridging this gap. Cato will route to Fed L1 when available. Monitor: GENIUS Act, CBDC working groups.",
+        fed_l1_note: "Federal Reserve tokenized deposits (reserves) do not exist and remain hypothetical. Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025), proposes PORTS as a potential sovereign instrument. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. The fed_l1 slot is a non-functional placeholder; recommended_rail is advisory only — Cato does not route or settle any trade.",
       };
     }
 
@@ -1128,7 +1130,7 @@ async function handleTool(name, args) {
         if (gate_decision === "HOLD") {
           recommended_rail = "traditional";
         } else {
-          reasons.push("All doctrine thresholds clear — atomic settlement viable");
+          reasons.push("All doctrine thresholds clear — no stress or congestion impediments detected");
           recommended_rail = "atomic";
         }
       }
@@ -1185,7 +1187,7 @@ async function handleTool(name, args) {
           fallback_used: prices.fallback_used,
         },
         solana_note: "Solana 400ms finality eliminates T+1 window entirely at near-zero cost. Network outage history (2022-2023) requires doctrine-level resilience planning. Fallback: Base L2.",
-        fed_l1_note: "Federal Reserve tokenized deposits (reserves) not yet available for on-chain settlement. PORTS (Duffie 2025) proposes sovereign instrument bridging this gap. Cato will route to Fed L1 when available. Monitor: GENIUS Act, CBDC working groups.",
+        fed_l1_note: "Federal Reserve tokenized deposits (reserves) do not exist and remain hypothetical. Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025), proposes PORTS as a potential sovereign instrument. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. The fed_l1 slot is a non-functional placeholder; recommended_rail is advisory only — Cato does not route or settle any trade.",
       };
     }
 
@@ -1223,7 +1225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato MCP Server v0.2.3 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, CoinGecko. Multi-chain settlement router with live prices (sticky cache) + SOFR delta funding-shock detector. Absolute doctrine for tokenized settlement governance.\n");
+  process.stderr.write("Cato MCP Server v0.2.3 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active.\n");
 }
 
 main().catch(err => {

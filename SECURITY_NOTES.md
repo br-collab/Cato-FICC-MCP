@@ -79,7 +79,7 @@ attempt a hono bump in-place.
 ### One-line fix command (if/when we choose to apply it)
 
 ```bash
-cd /Users/guillermoravelo/sam/references/cato-mcp && npm audit fix
+cd <path-to-cato-ficc-mcp> && npm audit fix
 ```
 
 This bumps hono to ≥4.12.14. No code changes to `index.js` required.
@@ -124,6 +124,61 @@ Cato's attack surface is narrower than a typical Node service because:
 
 ---
 
-*Maintained by Sam (Ravelo Strategic Solutions LLC) during read-only
-review of the Cato repo. No modifications to Cato's code are made by
-this document.*
+*Produced by AI coding agent (internal codename "Sam"); reviewed, validated,
+and owned by G. Ravelo, Ravelo Strategic Solutions LLC. No modifications to
+Cato's code are made by this document.*
+
+---
+
+## Regulatory and citation facts (doctrine version 0.2.2)
+
+Authoritative facts governing all descriptions, comments, and notes in this
+repo. These supersede any prior wording.
+
+### GENIUS Act
+
+Enacted July 2025. Governs **privately issued payment stablecoins** only.
+Does not create, authorize, or enable tokenized Federal Reserve reserves or
+central-bank digital currency. References to "GENIUS Act pending" or "GENIUS
+Act moving through the pipeline" are factually incorrect as of this version.
+
+### Tokenized Fed reserves / PORTS / fed_l1
+
+Tokenized Federal Reserve reserves **do not exist and remain hypothetical**.
+The `fed_l1` slot in Cato is a non-functional placeholder documented for
+architectural completeness. No tool routes to or through it.
+
+### PORTS citation
+
+Duffie, D. & Wilson, D. R. (2025). *The case for a new floating rate Treasury
+note.* Brookings Institution (Dec 2025). Proposes Perpetual Overnight Rate
+Treasury Securities (PORTS). **Wilson is a co-author; the paper title is not
+"The Case for PORTS."** Citations that omit Wilson or use the short title are
+incorrect.
+
+### SEC no-action letter (Dec 2025)
+
+The SEC's December 2025 no-action relief permits DTC to pilot tokenized
+securities settlements. Tokens are assigned **no settlement or collateral
+value**; on-chain settlement finality is not established by this letter.
+
+### JEP "Safe Haven" paper
+
+Duffie, D. (2025). *How US Treasuries Can Remain the World's Safe Haven.*
+Journal of Economic Perspectives. This is **dealer-balance-sheet and safe-haven
+demand research**, not a tokenization proposal. Should not be cited as a basis
+for on-chain settlement claims.
+
+### Read-only scope
+
+Cato is read-only and advisory. No tool in this server initiates, routes, or
+settles a trade. The doctrine gate outputs (`PROCEED` / `HOLD` / `ESCALATE`)
+and `recommended_chain` / `recommended_rail` fields are advisory inputs to a
+human authority gate, not execution paths.
+
+### Version table
+
+| Component | Version |
+|---|---|
+| Package (`cato-ficc-mcp`) | 0.2.3 |
+| Doctrine (SOFR delta trigger restored) | 0.2.2 |

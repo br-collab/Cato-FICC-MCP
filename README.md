@@ -174,25 +174,25 @@ else                                             → ethereum_l1        (safe de
 | **Base** (Ethereum L2) | ~2s | ~0.01 gwei, fetched from `base.blockscout.com` | Live |
 | **Arbitrum** (Ethereum L2) | ~2s | ~0.02 gwei, fetched from `arbitrum.blockscout.com` | Live |
 | **Solana** | ~400ms | ~$0.001 per settlement, `getRecentPrioritizationFees` via public RPC | Experimental |
-| **Fed L1 / PORTS** | Instant | TBD | Pending |
+| **Fed L1 / PORTS** | Instant | TBD | Not yet issued (hypothetical) |
 
-> **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. When the Fed issues tokenized reserves or PORTS, Cato routes there. The doctrine doesn't change. The rail does.**
+> **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**
 
 ### Fed L1 / PORTS notes
 
-The `fed_l1` placeholder is not wishful thinking. Darrell Duffie is testifying
-before Congress about it. The GENIUS Act is moving through the legislative
-pipeline. When tokenized Fed reserves arrive, every system that didn't plan
-for them will scramble to retrofit. **Cato has the slot ready now.** The
-doctrine doesn't change when Fed L1 arrives; the rail does.
+The `fed_l1` slot is a documented, non-functional placeholder. Tokenized Federal
+Reserve reserves do not exist and remain hypothetical. The GENIUS Act (enacted
+July 2025) governs privately issued payment stablecoins, not central-bank money.
+**Cato has the slot ready now.** The doctrine doesn't change when a new rail is
+added; the rail does.
 
 ## Academic Foundation
 
 Cato's rail comparison framework is grounded in published economic research
 on tokenized Treasury settlement:
 
-- **Duffie, D. (2025).** *The Case for PORTS: Perpetual Overnight Rate Treasury Securities.* Brookings Institution.
-- **Duffie, D. (2025).** *How US Treasuries Can Remain the World's Safe Haven.* Journal of Economic Perspectives.
+- **Duffie, D. & Wilson, D. R. (2025).** *The case for a new floating rate Treasury note.* Brookings Institution (Dec 2025). Proposes Perpetual Overnight Rate Treasury Securities (PORTS).
+- **Duffie, D. (2025).** *How US Treasuries Can Remain the World's Safe Haven.* Journal of Economic Perspectives. Dealer-balance-sheet research; not a tokenization proposal.
 
 ## Security
 
