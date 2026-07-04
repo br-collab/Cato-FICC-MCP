@@ -76,10 +76,19 @@ let _lastLivePrices = {
 // MCP server and the Python twin so the gate produces the same decision
 // regardless of caller. v0.2.2 restores the SOFR delta trigger that was
 // in the v0.1.0 spec but silently dropped during the v0.2.0 refactor.
-const CATO_OFR_ESCALATE_THRESHOLD = 1.0;
-const CATO_OFR_HOLD_THRESHOLD = 0.5;
-const CATO_GAS_GWEI_HOLD_THRESHOLD = 50.0;
-const CATO_SOFR_DELTA_HOLD_BPS = 10.0;   // funding-market shock detector
+// WS-0.2 (AUR-ROADMAP-001): the decision core now lives in gate_core.js
+// — a pure, I/O-free module — so the parity harness
+// (Grid 3 parity/run_parity.py) can drive the EXACT code this server
+// executes with golden input vectors against the Python twin. Thresholds
+// are re-exported here so existing references keep working.
+const {
+  CATO_OFR_ESCALATE_THRESHOLD,
+  CATO_OFR_HOLD_THRESHOLD,
+  CATO_GAS_GWEI_HOLD_THRESHOLD,
+  CATO_SOFR_DELTA_HOLD_BPS,
+  computeGateDecision,
+  pickRecommendedChain,
+} = require("./gate_core.js");
 
 // Speed properties (informational, used by get_multichain_gas and
 // compare_settlement_rails output). Block times are rough medians.
@@ -1102,54 +1111,21 @@ async function handleTool(name, args) {
         ? Math.abs(sofrToday - sofrPrev) * 100
         : null;
 
-      const reasons = [];
-      let gate_decision = "PROCEED";
-      let recommended_rail = "atomic";
-      let recommended_chain = null;
-
-      // ESCALATE first — systemic stress overrides everything
-      if (ofr_stress > CATO_OFR_ESCALATE_THRESHOLD) {
-        gate_decision = "ESCALATE";
-        recommended_rail = "human_authority";
-        reasons.push(`OFR stress index at ${ofr_stress.toFixed(2)} — systemic stress threshold (>${CATO_OFR_ESCALATE_THRESHOLD}) breached`);
-      } else {
-        // HOLD if non-systemic friction
-        if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
-          gate_decision = "HOLD";
-          reasons.push(`OFR stress index at ${ofr_stress.toFixed(2)} — above-average stress (>${CATO_OFR_HOLD_THRESHOLD})`);
-        }
-        if (gas_gwei !== null && gas_gwei !== undefined && gas_gwei > CATO_GAS_GWEI_HOLD_THRESHOLD) {
-          gate_decision = "HOLD";
-          reasons.push(`ETH gas at ${gas_gwei} gwei — above ${CATO_GAS_GWEI_HOLD_THRESHOLD} gwei doctrine threshold`);
-        }
-        // v0.2.2: SOFR 1-day delta trigger (funding-market shock detector)
-        if (sofrDeltaBps !== null && sofrDeltaBps > CATO_SOFR_DELTA_HOLD_BPS) {
-          gate_decision = "HOLD";
-          reasons.push(`SOFR 1-day move of ${sofrDeltaBps.toFixed(1)} bps exceeds ${CATO_SOFR_DELTA_HOLD_BPS} bps doctrine threshold (funding-market shock indicator)`);
-        }
-        if (gate_decision === "HOLD") {
-          recommended_rail = "traditional";
-        } else {
-          reasons.push("All doctrine thresholds clear — no stress or congestion impediments detected");
-          recommended_rail = "atomic";
-        }
-      }
+      // WS-0.2 (AUR-ROADMAP-001): decision + chain selection now route
+      // through gate_core.js — the pure module the parity harness drives
+      // with golden vectors. Logic is verbatim-identical to the inline
+      // block this replaced (see gate_core.js header for provenance);
+      // the a2fbf83 accuracy-pass rewording of the all-clear reason
+      // string is carried into gate_core.js as the single source of truth.
+      const { gate_decision, reasons, recommended_rail } = computeGateDecision({
+        ofr_stress,
+        gas_gwei,
+        sofr_delta_bps: sofrDeltaBps,
+      });
 
       // Recommended chain selection (only meaningful for PROCEED).
-      if (gate_decision === "PROCEED") {
-        const solana_fee_usd = rails.solana.fee_usd_estimate;
-        const base_gas = rails.base.gas_gwei;
-        const eth_gas = rails.ethereum.gas_gwei;
-        if (solana_fee_usd !== null && solana_fee_usd < 0.01) {
-          recommended_chain = "solana";
-        } else if (base_gas !== null && base_gas < 1) {
-          recommended_chain = "base";
-        } else if (eth_gas !== null) {
-          recommended_chain = "ethereum";
-        } else {
-          recommended_chain = null;
-        }
-      }
+      const recommended_chain =
+        gate_decision === "PROCEED" ? pickRecommendedChain(rails) : null;
 
       return {
         gate_decision,
