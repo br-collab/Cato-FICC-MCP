@@ -130,7 +130,56 @@ Cato's code are made by this document.*
 
 ---
 
-## Regulatory and citation facts (doctrine version 0.2.2)
+## v0.3.0 change review — XRPL rail (2026-07-23)
+
+Delta review for the xrpl settlement rail. Scope: new outbound surface
+and threat-model impact only; the hono disposition above is unchanged
+(no new npm dependencies were added — XRPL calls reuse axios).
+
+### New outbound endpoints
+
+| Endpoint | Operator | Method | Body |
+|---|---|---|---|
+| `https://xrplcluster.com/` | Community-run XRPL cluster | JSON-RPC POST | static `{"method":"fee","params":[{}]}` |
+| `https://s1.ripple.com:51234/` | Ripple (fallback) | JSON-RPC POST | static `{"method":"fee","params":[{}]}` |
+
+Additionally, `https://api.coingecko.com` requests now include `ripple`
+in the `ids` parameter (same endpoint, same GET pattern as before).
+
+No untrusted input flows into any XRPL request URL or body — both are
+fixed constants, consistent with the existing allowlist posture.
+
+### Correction to the 2026-04-19 audit's outbound-surface claim
+
+Sam's reachability analysis states outbound HTTP is "GET-only against a
+fixed URL allowlist." That was already superseded when the Solana
+JSON-RPC POST landed (v0.2.0+) and is further superseded by the XRPL
+POSTs above. The accurate statement as of v0.3.0: **outbound HTTP is a
+fixed allowlist of GET endpoints plus three JSON-RPC POST endpoints
+(Solana RPC, xrplcluster.com, s1.ripple.com) whose request bodies are
+static constants.** The security properties the audit relied on
+(no dynamic URL construction, no untrusted input in requests, responses
+parsed as JSON and relayed verbatim) continue to hold.
+
+### Threat-model impact
+
+- **Upstream data poisoning (existing class, new instance).**
+  xrplcluster.com is community-operated, not Ripple-operated. A
+  compromised or lying cluster could misreport `open_ledger_fee`,
+  skewing the fee input to the routing recommendation. Mitigations:
+  s1.ripple.com fallback is Ripple-operated; the value is bounded in
+  impact (worst case is a wrong advisory `recommended_rail`, which
+  remains an input to the human authority gate, never an execution
+  path); and an absurd fee simply prices XRPL out of the ultra-low
+  tier rather than forcing selection.
+- **Fail-safe behavior.** If all XRPL endpoints are unreachable, the
+  rail degrades to the reference base fee (10 drops) with an `error`
+  field and `status: "placeholder"` — mirroring the Solana fail-safe
+  pattern; no new failure mode.
+
+---
+
+## Regulatory and citation facts (doctrine version 0.3.0)
 
 Authoritative facts governing all descriptions, comments, and notes in this
 repo. These supersede any prior wording.
@@ -169,6 +218,20 @@ Journal of Economic Perspectives. This is **dealer-balance-sheet and safe-haven
 demand research**, not a tokenization proposal. Should not be cited as a basis
 for on-chain settlement claims.
 
+### XRPL rail facts (v0.3.0)
+
+An XRPL transaction included in a validated ledger is **final** —
+consensus validation is deterministic, with no probabilistic
+confirmation window. Ledgers close every ~3-5 seconds. Fees are
+denominated in drops (1 XRP = 1,000,000 drops); the reference base fee
+is 10 drops and the open-ledger fee escalates under load. Incident
+record: one 64-minute consensus stall on Feb 4-5, 2025, with no loss
+of user assets — descriptions of XRPL as outage-free are incorrect and
+the stall must remain disclosed in `xrpl_note`. The deterministic-
+finality preference over Solana at equal ultra-low cost is doctrine
+(gate_core.js v0.3.0) and must stay mirrored in the Python twin per
+PARITY_XRPL.md.
+
 ### Read-only scope
 
 Cato is read-only and advisory. No tool in this server initiates, routes, or
@@ -180,5 +243,6 @@ human authority gate, not execution paths.
 
 | Component | Version |
 |---|---|
-| Package (`cato-ficc-mcp`) | 0.2.3 |
+| Package (`cato-ficc-mcp`) | 0.3.0 |
+| Doctrine (xrpl deterministic-finality preference) | 0.3.0 |
 | Doctrine (SOFR delta trigger restored) | 0.2.2 |
