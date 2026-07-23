@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.2.3.
+v0.3.0.
 
 ## Why "Cato"
 
@@ -30,18 +30,18 @@ and pre-trade control.
 ### Settlement Rails
 
 - `compare_settlement_rails` — All-in cost across FICC traditional,
-  Ethereum L1, Base, Arbitrum, Solana for a given notional. Returns ranked
-  table cheapest-to-most-expensive plus a recommended rail.
+  Ethereum L1, Base, Arbitrum, Solana, XRPL for a given notional. Returns
+  ranked table cheapest-to-most-expensive plus a recommended rail.
 - `get_tokenized_settlement_context` — Combined ETH gas + SOFR + OFR stress
   into a single posture: `favorable` / `monitor` / `elevated`.
 - `get_multichain_gas` — Live gas/fee state across Ethereum, Base, Arbitrum,
-  Solana, plus the documented `fed_l1` PORTS placeholder.
+  Solana, XRPL, plus the documented `fed_l1` PORTS placeholder.
 
 ### On-Chain Pricing
 
-- `get_onchain_prices` — Live ETH and SOL USD prices via the CoinGecko public
-  API. Used internally by the rail-cost tools; exposed standalone so callers
-  can query current spot prices without triggering a full comparison.
+- `get_onchain_prices` — Live ETH, SOL, and XRP USD prices via the CoinGecko
+  public API. Used internally by the rail-cost tools; exposed standalone so
+  callers can query current spot prices without triggering a full comparison.
 
 ### NY Fed Reference Rates
 
@@ -79,7 +79,8 @@ and pre-trade control.
 
 Data sources, all free and no auth required for core functionality: NY Fed,
 FRED (optional API key for higher rate limits), TreasuryDirect, OFR,
-SEC EDGAR, Blockscout, CoinGecko.
+SEC EDGAR, Blockscout, Solana RPC, XRPL JSON-RPC (xrplcluster.com with
+s1.ripple.com fallback), CoinGecko.
 
 ## Installation
 
@@ -158,12 +159,28 @@ generated.
 
 ```
 if      OFR stress > 0.5                         → ficc_traditional   (stress overrides everything)
+else if |SOFR 1-day delta| > 10 bps              → ficc_traditional   (funding-market shock override)
 else if notional > $10M  and  eth_gas < 30 gwei  → ethereum_l1        (large notional, gas is noise)
-else if solana_fee_usd < $0.01                   → solana             (ultra-low cost at any size)
+else if xrpl_fee_usd < $0.01                     → xrpl               (ultra-low cost + deterministic ~4s finality)
+else if solana_fee_usd < $0.01                   → solana             (ultra-low cost, probabilistic-speed tier)
 else if base_gas < 1 gwei                        → base               (L2 default when available)
 else if eth_gas > 50 gwei                        → ficc_traditional   (gas spike fallback)
 else                                             → ethereum_l1        (safe default)
 ```
+
+**v0.3.0 doctrine event — why XRPL outranks Solana.** At equal near-zero
+cost the router prefers certainty of finality over raw speed. An XRPL
+transaction in a validated ledger is final — consensus validation is
+deterministic, with no probabilistic confirmation window — at a ~4s ledger
+close and a fee of typically 10-15 drops (~$0.00003). Solana is 10× faster
+(400ms) but carries the 2022-2023 outage history already flagged in Cato's
+`solana_note`. For institutional DvP settlement, 3.6 seconds is noise;
+finality certainty is not. XRPL's own incident record (one 64-minute
+consensus stall, Feb 4-5, 2025, no loss of user assets) is disclosed in
+`xrpl_note` — the preference is earned on the merits, not granted by
+exemption. Per the parity principle, this doctrine change ships with a
+mirrored change to the Python twin (`aureon/mcp/cato_client.py`); see
+`PARITY_XRPL.md`.
 
 ### Settlement Rails
 
@@ -174,6 +191,7 @@ else                                             → ethereum_l1        (safe de
 | **Base** (Ethereum L2) | ~2s | ~0.01 gwei, fetched from `base.blockscout.com` | Live |
 | **Arbitrum** (Ethereum L2) | ~2s | ~0.02 gwei, fetched from `arbitrum.blockscout.com` | Live |
 | **Solana** | ~400ms | ~$0.001 per settlement, `getRecentPrioritizationFees` via public RPC | Experimental |
+| **XRPL** | ~4s (deterministic finality) | ~10-15 drops ≈ $0.00003, `fee` method via public JSON-RPC | Live (v0.3.0) |
 | **Fed L1 / PORTS** | Instant | TBD | Not yet issued (hypothetical) |
 
 > **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**

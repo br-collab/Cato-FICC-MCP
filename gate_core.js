@@ -28,6 +28,10 @@ const CATO_OFR_ESCALATE_THRESHOLD = 1.0;
 const CATO_OFR_HOLD_THRESHOLD = 0.5;
 const CATO_GAS_GWEI_HOLD_THRESHOLD = 50.0;
 const CATO_SOFR_DELTA_HOLD_BPS = 10.0; // funding-market shock detector
+// v0.3.0: ultra-low-cost threshold shared by the XRPL and Solana picker
+// branches. Was an inline 0.01 literal in v0.2.x; named here because the
+// xrpl rail reuses it and doctrine constants must have one home.
+const CATO_ULTRA_LOW_FEE_USD = 0.01;
 
 /**
  * Pure Cato gate decision. Inputs:
@@ -73,19 +77,34 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
 }
 
 /**
- * Cheapest-wins chain picker (PROCEED case only). Mirrors the Python
- * twin's _pick_recommended_chain — same keys, same priority order:
- *   1. Solana if fee_usd_estimate < $0.01
- *   2. Base   if base gas_gwei < 1
- *   3. Ethereum if it has live gas data
- *   4. null
+ * Chain picker (PROCEED case only). Mirrors the Python twin's
+ * _pick_recommended_chain — same keys, same priority order:
+ *   1. XRPL   if fee_usd_estimate < $0.01   (v0.3.0 — see doctrine note)
+ *   2. Solana if fee_usd_estimate < $0.01
+ *   3. Base   if base gas_gwei < 1
+ *   4. Ethereum if it has live gas data
+ *   5. null
+ *
+ * DOCTRINE EVENT (v0.3.0): xrpl slots ABOVE solana. At equal near-zero
+ * cost the picker prefers deterministic finality over raw speed: an XRPL
+ * ledger close (~4s) is final when validated — no probabilistic
+ * confirmation window — while Solana's 400ms edge carries the 2022-2023
+ * outage history already flagged in Cato's own solana_note (plus the
+ * 64-minute consensus stall XRPL itself logged on Feb 4-5, 2025, which
+ * is why XRPL gets a preference, not an exemption from doctrine). For
+ * institutional DvP settlement, certainty of finality is worth more than
+ * 3.6 seconds. This changes recommended_chain output whenever both XRPL
+ * and Solana are live and ultra-cheap — the Python twin MUST take the
+ * mirrored change in the same change set (see PARITY_XRPL.md).
  */
 function pickRecommendedChain(chainState) {
   const cs = chainState || {};
+  const xrplFee = (cs.xrpl || {}).fee_usd_estimate;
   const solFee = (cs.solana || {}).fee_usd_estimate;
   const baseGas = (cs.base || {}).gas_gwei;
   const ethGas = (cs.ethereum || {}).gas_gwei;
-  if (solFee !== null && solFee !== undefined && solFee < 0.01) return "solana";
+  if (xrplFee !== null && xrplFee !== undefined && xrplFee < CATO_ULTRA_LOW_FEE_USD) return "xrpl";
+  if (solFee !== null && solFee !== undefined && solFee < CATO_ULTRA_LOW_FEE_USD) return "solana";
   if (baseGas !== null && baseGas !== undefined && baseGas < 1) return "base";
   if (ethGas !== null && ethGas !== undefined) return "ethereum";
   return null;
@@ -96,6 +115,7 @@ module.exports = {
   CATO_OFR_HOLD_THRESHOLD,
   CATO_GAS_GWEI_HOLD_THRESHOLD,
   CATO_SOFR_DELTA_HOLD_BPS,
+  CATO_ULTRA_LOW_FEE_USD,
   computeGateDecision,
   pickRecommendedChain,
 };

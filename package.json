@@ -1,11 +1,11 @@
 {
   "name": "cato-ficc-mcp",
-  "version": "0.2.3",
-  "description": "Read-only MCP server for FICC market data — NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR. Advisory use only; no tool routes or settles a trade. v0.2.3 adds sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
+  "version": "0.3.0",
+  "description": "Read-only MCP server for FICC market data — NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR. Advisory use only; no tool routes or settles a trade. v0.3.0 adds the XRPL settlement rail (live fee state via public JSON-RPC, deterministic-finality routing preference); v0.2.3 added sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
   "main": "index.js",
   "bin": { "cato-ficc-mcp": "./index.js" },
   "scripts": { "start": "node index.js" },
-  "keywords": ["mcp", "ficc", "sofr", "treasury", "repo", "tokenization", "defi", "tradfi", "aureon"],
+  "keywords": ["mcp", "ficc", "sofr", "treasury", "repo", "tokenization", "defi", "tradfi", "aureon", "xrpl", "xrp", "settlement"],
   "author": "Guillermo (Bill) Ravelo",
   "license": "MIT",
   "dependencies": {

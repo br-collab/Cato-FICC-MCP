@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 /**
- * Cato MCP Server — v0.2.3
+ * Cato MCP Server — v0.3.0
  * Read-only advisory data layer for tokenized settlement governance.
  * Multi-chain market data server with live CoinGecko price feeds.
+ * v0.3.0 adds the XRPL settlement rail: live fee state via the XRPL
+ * public JSON-RPC `fee` method (xrplcluster.com, s1.ripple.com fallback),
+ * XRP in the CoinGecko sticky price cache, xrpl entries in
+ * get_multichain_gas / compare_settlement_rails / both gates, and a
+ * DOCTRINE EVENT in gate_core.js: xrpl slots above solana in the chain
+ * picker — deterministic single-ledger finality (~4s) is preferred over
+ * probabilistic 400ms speed at equal near-zero cost. Python twin mirror
+ * required (PARITY_XRPL.md).
  * v0.2.3 adds a sticky last-known-good price cache so transient
  * CoinGecko failures no longer flip the displayed price to the
  * static $3,500 / $150 constants — the static values are now
@@ -23,7 +31,8 @@
  *   - SEC EDGAR:     13F filings, institutional positioning
  *   - Blockscout:    On-chain network state (ETH, Base, Arbitrum)
  *   - Solana RPC:    Priority fees, settlement speed
- *   - CoinGecko:     Live ETH and SOL USD prices (v0.2.1)
+ *   - XRPL JSON-RPC: Ledger fee state via public cluster (v0.3.0)
+ *   - CoinGecko:     Live ETH, SOL, and XRP USD prices
  *
  * Reference: Duffie, D. & Wilson, D. R. (2025), "The case for a new floating rate Treasury note,"
  *   Brookings Institution (Dec 2025) — proposes Perpetual Overnight Rate Treasury Securities (PORTS).
@@ -52,6 +61,16 @@ const BLOCKSCOUT_CHAINS = {
 };
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 
+// XRPL public JSON-RPC endpoints (v0.3.0). xrplcluster.com is a
+// community-run full-history cluster; s1.ripple.com is Ripple's public
+// server, used as fallback. Both free, no auth. The `fee` method returns
+// current open-ledger fee state in drops (1 XRP = 1,000,000 drops;
+// reference base fee 10 drops, escalating under load).
+const XRPL_RPC_ENDPOINTS = [
+  "https://xrplcluster.com/",
+  "https://s1.ripple.com:51234/",
+];
+
 // Price fallback values — used only when the CoinGecko public API is
 // unreachable AND we have no sticky last-known-good value. v0.2.1
 // replaced the v0.2.0 static proxies with live CoinGecko prices via
@@ -60,6 +79,7 @@ const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 // constant (the Jonathan-on-a-trading-desk-review failure mode).
 const ETH_PRICE_FALLBACK = 3500;   // USD per ETH — CoinGecko cold-boot fallback
 const SOL_PRICE_FALLBACK = 150;    // USD per SOL — CoinGecko cold-boot fallback
+const XRP_PRICE_FALLBACK = 2.50;   // USD per XRP — CoinGecko cold-boot fallback (v0.3.0)
 
 // v0.2.3 sticky last-known-good price cache. Updated on every
 // successful getLivePrices() call. Read on failure so transient
@@ -68,6 +88,7 @@ const SOL_PRICE_FALLBACK = 150;    // USD per SOL — CoinGecko cold-boot fallba
 let _lastLivePrices = {
   eth: null,     // USD per ETH
   sol: null,     // USD per SOL
+  xrp: null,     // USD per XRP (v0.3.0)
   ts: 0,         // Date.now() of last successful fetch
 };
 
@@ -86,6 +107,7 @@ const {
   CATO_OFR_HOLD_THRESHOLD,
   CATO_GAS_GWEI_HOLD_THRESHOLD,
   CATO_SOFR_DELTA_HOLD_BPS,
+  CATO_ULTRA_LOW_FEE_USD,
   computeGateDecision,
   pickRecommendedChain,
 } = require("./gate_core.js");
@@ -97,6 +119,7 @@ const CHAIN_SPEED = {
   base:     "2s",
   arbitrum: "2s",
   solana:   "400ms",
+  xrpl:     "4s",     // ledger close ~3-5s; DETERMINISTIC finality on validation
 };
 
 const FRED_KEY = process.env.FRED_API_KEY || ""; // Free key from fred.stlouisfed.org
@@ -104,7 +127,7 @@ const FRED_KEY = process.env.FRED_API_KEY || ""; // Free key from fred.stlouisfe
 async function get(url, params = {}) {
   try {
     const res = await axios.get(url, { params, timeout: 10000,
-      headers: { "User-Agent": "Cato-MCP-Server/0.2.3 (open-source; Project Aureon; contact: github)" }
+      headers: { "User-Agent": "Cato-MCP-Server/0.3.0 (open-source; Project Aureon; contact: github)" }
     });
     return res.data;
   } catch (e) {
@@ -135,32 +158,36 @@ async function getLivePrices() {
   try {
     const res = await get(
       "https://api.coingecko.com/api/v3/simple/price",
-      { ids: "ethereum,solana", vs_currencies: "usd" }
+      { ids: "ethereum,solana,ripple", vs_currencies: "usd" }
     );
     const ethUsd = res?.ethereum?.usd;
     const solUsd = res?.solana?.usd;
-    if (ethUsd && solUsd) {
+    const xrpUsd = res?.ripple?.usd;   // CoinGecko id for XRP is "ripple"
+    if (ethUsd && solUsd && xrpUsd) {
       // Sticky cache update — remember for future transient failures.
       _lastLivePrices.eth = ethUsd;
       _lastLivePrices.sol = solUsd;
+      _lastLivePrices.xrp = xrpUsd;
       _lastLivePrices.ts = Date.now();
       return {
         eth: ethUsd,
         sol: solUsd,
+        xrp: xrpUsd,
         source: "coingecko_public",
         timestamp: new Date().toISOString(),
         fallback_used: false,
         note: "Live prices via CoinGecko public API. For institutional deployment use a licensed price feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
       };
     }
-    throw new Error("CoinGecko response missing ethereum or solana field");
+    throw new Error("CoinGecko response missing ethereum, solana, or ripple field");
   } catch (e) {
     // Failure path — prefer sticky last-known-good over static constants.
-    if (_lastLivePrices.eth !== null && _lastLivePrices.sol !== null) {
+    if (_lastLivePrices.eth !== null && _lastLivePrices.sol !== null && _lastLivePrices.xrp !== null) {
       const stale_age_seconds = Math.round((Date.now() - _lastLivePrices.ts) / 1000);
       return {
         eth: _lastLivePrices.eth,
         sol: _lastLivePrices.sol,
+        xrp: _lastLivePrices.xrp,
         source: "coingecko_stale",
         timestamp: new Date().toISOString(),
         fallback_used: true,
@@ -173,6 +200,7 @@ async function getLivePrices() {
     return {
       eth: ETH_PRICE_FALLBACK,
       sol: SOL_PRICE_FALLBACK,
+      xrp: XRP_PRICE_FALLBACK,
       source: "static_fallback",
       timestamp: new Date().toISOString(),
       fallback_used: true,
@@ -267,6 +295,56 @@ async function solanaStats(solPrice) {
   }
 }
 
+// ── XRPL helper (v0.3.0) ─────────────────────────────────────────────────────
+// Uses the XRPL public JSON-RPC `fee` method to read current open-ledger
+// fee state. Fee units are drops: 1 XRP = 1,000,000 drops; the reference
+// base fee is 10 drops and the open-ledger fee escalates under load, so
+// we charge the settlement at max(open_ledger_fee, base_fee). Tries
+// xrplcluster.com first, then s1.ripple.com. Takes an xrpPrice USD so it
+// can compute a live fee_usd on top of the raw drops.
+//
+// Finality note (doctrine-relevant): an XRPL transaction included in a
+// validated ledger is FINAL — consensus validation is deterministic, with
+// no probabilistic confirmation window. Ledgers close every ~3-5 seconds.
+async function xrplStats(xrpPrice) {
+  const priceUsd = xrpPrice || XRP_PRICE_FALLBACK;
+  for (const endpoint of XRPL_RPC_ENDPOINTS) {
+    try {
+      const res = await axios.post(
+        endpoint,
+        { method: "fee", params: [{}] },
+        { timeout: 5000, headers: { "Content-Type": "application/json",
+            "User-Agent": "Cato-MCP-Server/0.3.0 (open-source; Project Aureon)" } }
+      );
+      const drops = res.data?.result?.drops;
+      if (!drops) continue;   // malformed response — try next endpoint
+      const baseFee = parseInt(drops.base_fee, 10) || 10;
+      const openLedgerFee = parseInt(drops.open_ledger_fee, 10) || baseFee;
+      const totalDrops = Math.max(openLedgerFee, baseFee);
+      return {
+        base_fee_drops: baseFee,
+        open_ledger_fee_drops: openLedgerFee,
+        total_fee_drops: totalDrops,
+        total_fee_xrp: totalDrops * 1e-6,
+        total_fee_usd: totalDrops * 1e-6 * priceUsd,
+        endpoint,
+      };
+    } catch (e) {
+      // fall through to next endpoint
+    }
+  }
+  // Fail safe — assume reference base fee only so XRPL still shows a
+  // cost estimate (mirrors the solanaStats fail-safe pattern).
+  return {
+    base_fee_drops: 10,
+    open_ledger_fee_drops: 10,
+    total_fee_drops: 10,
+    total_fee_xrp: 10 * 1e-6,
+    total_fee_usd: 10 * 1e-6 * priceUsd,
+    error: "all XRPL endpoints unreachable — using reference base fee (10 drops)",
+  };
+}
+
 // ── Multi-chain orchestrator ─────────────────────────────────────────────────
 // Fetches gas/fee state across every supported rail in parallel. Each fetch
 // is isolated so one slow/broken chain can never block the others. Takes a
@@ -274,12 +352,13 @@ async function solanaStats(solPrice) {
 // CoinGecko value. Returns a uniform shape per chain plus the documented
 // fed_l1 placeholder.
 async function multichainGas(prices) {
-  const resolvedPrices = prices || { eth: ETH_PRICE_FALLBACK, sol: SOL_PRICE_FALLBACK };
-  const [eth, base, arb, sol] = await Promise.all([
+  const resolvedPrices = prices || { eth: ETH_PRICE_FALLBACK, sol: SOL_PRICE_FALLBACK, xrp: XRP_PRICE_FALLBACK };
+  const [eth, base, arb, sol, xrpl] = await Promise.all([
     blockscoutStatsFor("ethereum"),
     blockscoutStatsFor("base"),
     blockscoutStatsFor("arbitrum"),
     solanaStats(resolvedPrices.sol),
+    xrplStats(resolvedPrices.xrp),
   ]);
 
   const chainBlock = (key, stats) => {
@@ -312,6 +391,15 @@ async function multichainGas(prices) {
       status: sol.error ? "placeholder" : "live",
       note: `Solana 400ms finality. Base fee 5000 lamports + median prioritization. Live SOL price: $${resolvedPrices.sol.toFixed(2)}.`,
     },
+    xrpl: {
+      fee_drops:        xrpl.total_fee_drops,
+      fee_usd_estimate: +xrpl.total_fee_usd.toFixed(6),
+      base_fee_drops:   xrpl.base_fee_drops,
+      open_ledger_fee_drops: xrpl.open_ledger_fee_drops,
+      settlement_speed: CHAIN_SPEED.xrpl,
+      status: xrpl.error ? "placeholder" : "live",
+      note: `XRPL ~4s ledger close with DETERMINISTIC finality on validation (no probabilistic confirmation window). Fee = max(open_ledger_fee, base_fee) in drops (1 XRP = 1,000,000 drops; reference base 10 drops). Live XRP price: $${(resolvedPrices.xrp || XRP_PRICE_FALLBACK).toFixed(2)}.`,
+    },
     fed_l1: {
       status: "not_yet_issued",
       note: "Non-functional placeholder. Tokenized Federal Reserve reserves do not exist and remain hypothetical. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. Reference: Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025).",
@@ -340,6 +428,11 @@ function solanaCost(feeLamports, solPriceUsd) {
   if (feeLamports === null || feeLamports === undefined) return null;
   const price = solPriceUsd || SOL_PRICE_FALLBACK;
   return feeLamports * 1e-9 * price;
+}
+function xrplCost(feeDrops, xrpPriceUsd) {
+  if (feeDrops === null || feeDrops === undefined) return null;
+  const price = xrpPriceUsd || XRP_PRICE_FALLBACK;
+  return feeDrops * 1e-6 * price;   // drops → XRP → USD
 }
 
 // ── TOOL DEFINITIONS ─────────────────────────────────────────────────────────
@@ -489,12 +582,12 @@ const TOOLS = [
   // ── TOKENIZED SETTLEMENT TOOLS (Cato doctrine layer) ──────────────────────
   {
     name: "get_onchain_prices",
-    description: "Live ETH and SOL USD prices from the free CoinGecko public API (no auth). Returns {eth, sol, source, timestamp, fallback_used}. Used internally by compare_settlement_rails and get_atomic_settlement_gate for accurate rail cost math; exposed as a standalone tool so LLM callers can query current spot prices without triggering the full rail comparison. Institutional deployments should swap this for a licensed feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
+    description: "Live ETH, SOL, and XRP USD prices from the free CoinGecko public API (no auth). Returns {eth, sol, xrp, source, timestamp, fallback_used}. Used internally by compare_settlement_rails and get_atomic_settlement_gate for accurate rail cost math; exposed as a standalone tool so LLM callers can query current spot prices without triggering the full rail comparison. Institutional deployments should swap this for a licensed feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_multichain_gas",
-    description: "Fetch current gas/fee conditions across every supported settlement rail simultaneously: Ethereum mainnet, Base L2, Arbitrum L2, and Solana. Each chain is fetched in parallel and isolated so one slow upstream can never block the others. Includes a documented `fed_l1` non-functional placeholder (tokenized Fed reserves do not exist; The GENIUS Act, enacted July 2025, governs privately issued payment stablecoins, not central-bank money). Output shape: { ethereum, base, arbitrum, solana, fed_l1 }.",
+    description: "Fetch current gas/fee conditions across every supported settlement rail simultaneously: Ethereum mainnet, Base L2, Arbitrum L2, Solana, and XRPL. Each chain is fetched in parallel and isolated so one slow upstream can never block the others. XRPL fee state comes from the public JSON-RPC `fee` method (drops; ~4s deterministic finality). Includes a documented `fed_l1` non-functional placeholder (tokenized Fed reserves do not exist; The GENIUS Act, enacted July 2025, governs privately issued payment stablecoins, not central-bank money). Output shape: { ethereum, base, arbitrum, solana, xrpl, fed_l1 }.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -504,7 +597,7 @@ const TOOLS = [
   },
   {
     name: "compare_settlement_rails",
-    description: "Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: 0.5bps clearing fee net of 40% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × ETH_PRICE_PROXY. Solana: (base 5000 + median priority) lamports × SOL_PRICE_PROXY. Advisory ranking logic respects OFR stress (forces FICC) and gas spikes (forces FICC) before cheapest-cost selection. Does not route or settle any trade.",
+    description: "Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana, XRPL) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: 0.5bps clearing fee net of 40% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × live ETH price. Solana: (base 5000 + median priority) lamports × live SOL price. XRPL: max(open_ledger_fee, base_fee) drops × 1e-6 × live XRP price (~4s deterministic finality). Advisory ranking logic respects OFR stress (forces FICC), SOFR delta shocks (forces FICC), and gas spikes (forces FICC) before rail selection; at equal ultra-low cost XRPL is preferred over Solana on deterministic-finality grounds (v0.3.0 doctrine). Does not route or settle any trade.",
     inputSchema: { type: "object", properties: {
       notional_usd: { type: "number", description: "Notional trade size in USD" },
       term_days: { type: "number", description: "Settlement term in days (default 1 for overnight repo)", default: 1 }
@@ -512,7 +605,7 @@ const TOOLS = [
   },
   {
     name: "get_atomic_settlement_gate",
-    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_gate for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, and Solana. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei. PROCEED otherwise. Includes a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (non-functional placeholder; tokenized Fed reserves do not exist; GENIUS Act enacted July 2025 governs privately issued stablecoins). Does not route or settle any trade.",
+    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_gate for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, Solana, and XRPL. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei OR |SOFR 1-day delta| > 10 bps. PROCEED otherwise. Chain picker (v0.3.0 doctrine): XRPL first when its fee is ultra-low (deterministic ~4s finality preferred over probabilistic 400ms speed), then Solana, Base, Ethereum. Includes an xrpl_note (deterministic finality, Feb 2025 64-minute stall on record), a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (non-functional placeholder; tokenized Fed reserves do not exist; GENIUS Act enacted July 2025 governs privately issued stablecoins). Does not route or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
 
@@ -832,16 +925,15 @@ async function handleTool(name, args) {
       const t3mV = parseFloat(t3m.observations?.[0]?.value || 0);
       const ofrVal = parseFloat(stress.observations?.[0]?.value || 0);
 
-      // Chain recommendation — mirrors routing logic from
-      // get_atomic_settlement_gate so cato_gate's answer is consistent.
-      const sol_fee = rails.solana.fee_usd_estimate;
-      const base_gas = rails.base.gas_gwei;
+      // Chain recommendation — v0.3.0 delegates to gate_core's
+      // pickRecommendedChain (single source of truth, includes the xrpl
+      // rail) instead of the v0.2.x inline duplicate, so cato_gate can
+      // never drift from get_atomic_settlement_gate. Gate conditions
+      // (stress ≤ 0.5 and gas ≤ 50) are unchanged from v0.2.x.
       const eth_gas = rails.ethereum.gas_gwei;
       let recommended_chain = null;
-      if (ofrVal <= 1.0 && (eth_gas === null || eth_gas <= 50) && ofrVal <= 0.5) {
-        if (sol_fee !== null && sol_fee < 0.01) recommended_chain = "solana";
-        else if (base_gas !== null && base_gas < 1) recommended_chain = "base";
-        else if (eth_gas !== null) recommended_chain = "ethereum";
+      if (ofrVal <= CATO_OFR_HOLD_THRESHOLD && (eth_gas === null || eth_gas <= CATO_GAS_GWEI_HOLD_THRESHOLD)) {
+        recommended_chain = pickRecommendedChain(rails);
       }
 
       return {
@@ -872,6 +964,7 @@ async function handleTool(name, args) {
         price_sources: {
           eth_usd: prices.eth,
           sol_usd: prices.sol,
+          xrp_usd: prices.xrp,
           source: prices.source,
           timestamp: prices.timestamp,
           fallback_used: prices.fallback_used,
@@ -879,13 +972,14 @@ async function handleTool(name, args) {
       };
     }
 
-    // ── ONCHAIN PRICES (Cato v0.2.1) ───────────────────────────────────────
+    // ── ONCHAIN PRICES (Cato v0.2.1; XRP added v0.3.0) ─────────────────────
     case "get_onchain_prices": {
       const prices = await getLivePrices();
       return {
         source: "CoinGecko public API",
         eth_usd: prices.eth,
         sol_usd: prices.sol,
+        xrp_usd: prices.xrp,
         fetch_source: prices.source,
         timestamp: prices.timestamp,
         fallback_used: prices.fallback_used,
@@ -898,11 +992,12 @@ async function handleTool(name, args) {
       const prices = await getLivePrices();
       const rails = await multichainGas(prices);
       return {
-        source: "Blockscout (ETH/Base/Arbitrum) + Solana RPC + CoinGecko",
+        source: "Blockscout (ETH/Base/Arbitrum) + Solana RPC + XRPL JSON-RPC + CoinGecko",
         timestamp: new Date().toISOString(),
         price_sources: {
           eth_usd: prices.eth,
           sol_usd: prices.sol,
+          xrp_usd: prices.xrp,
           source: prices.source,
           timestamp: prices.timestamp,
           fallback_used: prices.fallback_used,
@@ -977,6 +1072,7 @@ async function handleTool(name, args) {
       const base_cost = evmL1Cost(rails.base.gas_gwei, prices.eth);
       const arb_cost = evmL1Cost(rails.arbitrum.gas_gwei, prices.eth);
       const sol_cost = solanaCost(rails.solana.fee_lamports, prices.sol);
+      const xrpl_cost = xrplCost(rails.xrpl.fee_drops, prices.xrp);
 
       const railTable = {
         ficc_traditional: {
@@ -1009,6 +1105,13 @@ async function handleTool(name, args) {
           status: rails.solana.status,
           inputs: { fee_lamports: rails.solana.fee_lamports, sol_price_usd: prices.sol },
         },
+        xrpl: {
+          cost_usd: xrpl_cost !== null ? +xrpl_cost.toFixed(6) : null,
+          speed: rails.xrpl.settlement_speed,
+          status: rails.xrpl.status,
+          inputs: { fee_drops: rails.xrpl.fee_drops, xrp_price_usd: prices.xrp },
+          note: "Deterministic finality on ledger validation (~4s). Fee = max(open_ledger_fee, base_fee); reference base 10 drops.",
+        },
         fed_l1: {
           cost_usd: null,
           speed: "instant",
@@ -1023,10 +1126,11 @@ async function handleTool(name, args) {
         .sort((a, b) => a[1].cost_usd - b[1].cost_usd)
         .map(([name, r]) => ({ rail: name, cost_usd: r.cost_usd, speed: r.speed, status: r.status }));
 
-      // ── Routing logic (Cato v0.2.2 doctrine — SOFR delta override added)
+      // ── Routing logic (Cato v0.3.0 doctrine — xrpl rail added above solana)
       const eth_gas = rails.ethereum.gas_gwei;
       const base_gas = rails.base.gas_gwei;
       const solana_fee_usd = rails.solana.fee_usd_estimate;
+      const xrpl_fee_usd = rails.xrpl.fee_usd_estimate;
 
       let recommended_rail;
       if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
@@ -1035,8 +1139,10 @@ async function handleTool(name, args) {
         recommended_rail = "ficc_traditional";            // SOFR delta override (v0.2.2)
       } else if (notional_usd > 10_000_000 && eth_gas !== null && eth_gas < 30) {
         recommended_rail = "ethereum_l1";                 // large notional, gas is noise
-      } else if (solana_fee_usd !== null && solana_fee_usd < 0.01) {
-        recommended_rail = "solana";                      // ultra-low cost for any size
+      } else if (xrpl_fee_usd !== null && xrpl_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
+        recommended_rail = "xrpl";                        // ultra-low cost + deterministic ~4s finality (v0.3.0)
+      } else if (solana_fee_usd !== null && solana_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
+        recommended_rail = "solana";                      // ultra-low cost, probabilistic-speed tier
       } else if (base_gas !== null && base_gas < 1) {
         recommended_rail = "base";                        // L2 default when available
       } else if (eth_gas !== null && eth_gas > CATO_GAS_GWEI_HOLD_THRESHOLD) {
@@ -1046,7 +1152,7 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: "FRED (SOFR, STLFSI4) + Blockscout (ETH/Base/Arbitrum) + Solana RPC + CoinGecko",
+        source: "FRED (SOFR, STLFSI4) + Blockscout (ETH/Base/Arbitrum) + Solana RPC + XRPL JSON-RPC + CoinGecko",
         timestamp: new Date().toISOString(),
         inputs: {
           notional_usd,
@@ -1063,12 +1169,15 @@ async function handleTool(name, args) {
           base_gas_gwei: base_gas,
           arbitrum_gas_gwei: rails.arbitrum.gas_gwei,
           solana_fee_usd_estimate: solana_fee_usd,
+          xrpl_fee_usd_estimate: xrpl_fee_usd,
           eth_price_usd: prices.eth,
           sol_price_usd: prices.sol,
+          xrp_price_usd: prices.xrp,
         },
         price_sources: {
           eth_usd: prices.eth,
           sol_usd: prices.sol,
+          xrp_usd: prices.xrp,
           source: prices.source,
           timestamp: prices.timestamp,
           fallback_used: prices.fallback_used,
@@ -1077,7 +1186,7 @@ async function handleTool(name, args) {
         rails: railTable,
         ranked,
         recommended_rail,
-        doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato v0.2.2 routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional.",
+        doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional. v0.3.0 doctrine: at equal ultra-low cost (< $0.01) XRPL is preferred over Solana because deterministic single-ledger finality (~4s, no probabilistic confirmation window) dominates raw speed for institutional DvP settlement.",
         fed_l1_note: "Federal Reserve tokenized deposits (reserves) do not exist and remain hypothetical. Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025), proposes PORTS as a potential sovereign instrument. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. The fed_l1 slot is a non-functional placeholder; recommended_rail is advisory only — Cato does not route or settle any trade.",
       };
     }
@@ -1139,7 +1248,10 @@ async function handleTool(name, args) {
         // (v0.2.2 + sofr_today_pct/sofr_prev_pct) produced bit-for-bit
         // identical DECISIONS for identical inputs but diverged in the
         // emitted schema, violating Grid 3 CLAUDE.md's parity rule.
-        doctrine: "Verana L0 — Cato settlement gate v0.2.3",
+        // v0.3.0 doctrine string bump is part of the xrpl doctrine event
+        // — the Python twin takes the same string in the same change set
+        // (PARITY_XRPL.md).
+        doctrine: "Verana L0 — Cato settlement gate v0.3.0",
         inputs: {
           ofr_stress,
           gas_gwei,
@@ -1158,10 +1270,12 @@ async function handleTool(name, args) {
         price_sources: {
           eth_usd: prices.eth,
           sol_usd: prices.sol,
+          xrp_usd: prices.xrp,
           source: prices.source,
           timestamp: prices.timestamp,
           fallback_used: prices.fallback_used,
         },
+        xrpl_note: "XRPL ~4s ledger close with deterministic finality on validation — no probabilistic confirmation window. Fee typically 10-15 drops (~$0.00003). Preferred over Solana at equal ultra-low cost (v0.3.0 doctrine): certainty of finality dominates raw speed for institutional DvP. Incident history: one 64-minute consensus stall (Feb 4-5, 2025, no loss of user assets) — a preference on the merits, not an exemption from doctrine. Fallback: Solana, then Base L2.",
         solana_note: "Solana 400ms finality eliminates T+1 window entirely at near-zero cost. Network outage history (2022-2023) requires doctrine-level resilience planning. Fallback: Base L2.",
         fed_l1_note: "Federal Reserve tokenized deposits (reserves) do not exist and remain hypothetical. Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025), proposes PORTS as a potential sovereign instrument. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. The fed_l1 slot is a non-functional placeholder; recommended_rail is advisory only — Cato does not route or settle any trade.",
       };
@@ -1174,7 +1288,7 @@ async function handleTool(name, args) {
 
 // ── SERVER SETUP ─────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "cato", version: "0.2.3" },
+  { name: "cato", version: "0.3.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -1201,7 +1315,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato MCP Server v0.2.3 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active.\n");
+  process.stderr.write("Cato MCP Server v0.3.0 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
 }
 
 main().catch(err => {
