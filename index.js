@@ -108,6 +108,8 @@ const {
   CATO_GAS_GWEI_HOLD_THRESHOLD,
   CATO_SOFR_DELTA_HOLD_BPS,
   CATO_ULTRA_LOW_FEE_USD,
+  CATO_POSTURE_MONITOR_GAS,
+  isUsableStressReading,
   computeGateDecision,
   pickRecommendedChain,
 } = require("./gate_core.js");
@@ -923,16 +925,20 @@ async function handleTool(name, args) {
       const t10 = parseFloat(t10y.observations?.[0]?.value || 0);
       const t2  = parseFloat(t2y.observations?.[0]?.value || 0);
       const t3mV = parseFloat(t3m.observations?.[0]?.value || 0);
-      const ofrVal = parseFloat(stress.observations?.[0]?.value || 0);
+      const ofrRaw = stress.observations?.[0]?.value;
+      const ofrVal = ofrRaw !== undefined && ofrRaw !== null ? parseFloat(ofrRaw) : null;
+      const ofrUsable = isUsableStressReading(ofrVal);
 
       // Chain recommendation — v0.3.0 delegates to gate_core's
       // pickRecommendedChain (single source of truth, includes the xrpl
       // rail) instead of the v0.2.x inline duplicate, so cato_gate can
       // never drift from get_atomic_settlement_gate. Gate conditions
-      // (stress ≤ 0.5 and gas ≤ 50) are unchanged from v0.2.x.
+      // (stress ≤ 0.5 and gas ≤ 50) are unchanged from v0.2.x. An unusable
+      // reading is treated the same as failing the stress condition: no
+      // chain is recommended.
       const eth_gas = rails.ethereum.gas_gwei;
       let recommended_chain = null;
-      if (ofrVal <= CATO_OFR_HOLD_THRESHOLD && (eth_gas === null || eth_gas <= CATO_GAS_GWEI_HOLD_THRESHOLD)) {
+      if (ofrUsable && ofrVal <= CATO_OFR_HOLD_THRESHOLD && (eth_gas === null || eth_gas <= CATO_GAS_GWEI_HOLD_THRESHOLD)) {
         recommended_chain = pickRecommendedChain(rails);
       }
 
@@ -953,7 +959,8 @@ async function handleTool(name, args) {
         },
         systemic_stress: {
           ofr_stress_index: stress.observations?.[0],
-          stress_level: ofrVal > 1 ? "elevated" :
+          stress_level: !ofrUsable ? "unavailable" :
+                        ofrVal > 1 ? "elevated" :
                         ofrVal > 0 ? "above_average" : "normal"
         },
         fed_liquidity: {
@@ -1015,16 +1022,22 @@ async function handleTool(name, args) {
       ]);
       const gas_gwei = chain?.gas_gwei;
       const sofr_rate = parseFloat(sofr.observations?.[0]?.value || "0");
-      const ofr_stress = parseFloat(stress.observations?.[0]?.value || "0");
+      const ofrRaw = stress.observations?.[0]?.value;
+      const ofr_stress = ofrRaw !== undefined && ofrRaw !== null ? parseFloat(ofrRaw) : null;
 
       // Settlement posture per Cato doctrine thresholds:
-      //   elevated  — stress > 1.0 OR gas > 50
+      //   elevated  — stress > 1.0 OR gas > 50 OR the stress reading is unusable
       //   monitor   — stress 0.5..1.0 OR gas 30..50
       //   favorable — stress < 0.5 AND gas < 30
+      // An unusable reading (missing, NaN, +/-Infinity) maps to "elevated"
+      // rather than falling through to "favorable" — see gate_core.js
+      // isUsableStressReading. A posture tool that can't assess stress is
+      // not a posture tool that assumes calm.
+      const stress_reading_usable = isUsableStressReading(ofr_stress);
       let settlement_posture;
-      if (ofr_stress > 1.0 || (gas_gwei !== null && gas_gwei > 50)) {
+      if (!stress_reading_usable || ofr_stress > CATO_OFR_ESCALATE_THRESHOLD || (gas_gwei !== null && gas_gwei > CATO_GAS_GWEI_HOLD_THRESHOLD)) {
         settlement_posture = "elevated";
-      } else if (ofr_stress > 0.5 || (gas_gwei !== null && gas_gwei > 30)) {
+      } else if (ofr_stress > CATO_OFR_HOLD_THRESHOLD || (gas_gwei !== null && gas_gwei > CATO_POSTURE_MONITOR_GAS)) {
         settlement_posture = "monitor";
       } else {
         settlement_posture = "favorable";
@@ -1036,6 +1049,7 @@ async function handleTool(name, args) {
         gas_gwei,
         sofr_rate,
         ofr_stress,
+        stress_reading_usable,
         settlement_posture
       };
     }
@@ -1064,7 +1078,9 @@ async function handleTool(name, args) {
       const sofrDeltaBps = (sofrPrev !== null && !Number.isNaN(sofrPrev) && !Number.isNaN(sofr))
         ? Math.abs(sofr - sofrPrev) * 100
         : null;
-      const ofr_stress = parseFloat(stressSeries.observations?.[0]?.value || "0");
+      const ofrRaw = stressSeries.observations?.[0]?.value;
+      const ofr_stress = ofrRaw !== undefined && ofrRaw !== null ? parseFloat(ofrRaw) : null;
+      const stress_reading_usable = isUsableStressReading(ofr_stress);
 
       // ── Per-rail cost calculations (using live prices) ─────────────────
       const ficc_cost = ficcCost(notional_usd, sofr, term_days);
@@ -1133,7 +1149,9 @@ async function handleTool(name, args) {
       const xrpl_fee_usd = rails.xrpl.fee_usd_estimate;
 
       let recommended_rail;
-      if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
+      if (!stress_reading_usable) {
+        recommended_rail = "ficc_traditional";            // stress reading unusable — hold to the safe rail, don't guess
+      } else if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
         recommended_rail = "ficc_traditional";            // OFR stress override
       } else if (sofrDeltaBps !== null && sofrDeltaBps > CATO_SOFR_DELTA_HOLD_BPS) {
         recommended_rail = "ficc_traditional";            // SOFR delta override (v0.2.2)
@@ -1165,6 +1183,7 @@ async function handleTool(name, args) {
           sofr_prev_pct: sofrPrev,
           sofr_delta_bps: sofrDeltaBps !== null ? +sofrDeltaBps.toFixed(2) : null,
           ofr_stress,
+          stress_reading_usable,
           ethereum_gas_gwei: eth_gas,
           base_gas_gwei: base_gas,
           arbitrum_gas_gwei: rails.arbitrum.gas_gwei,

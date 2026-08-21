@@ -32,10 +32,31 @@ const CATO_SOFR_DELTA_HOLD_BPS = 10.0; // funding-market shock detector
 // branches. Was an inline 0.01 literal in v0.2.x; named here because the
 // xrpl rail reuses it and doctrine constants must have one home.
 const CATO_ULTRA_LOW_FEE_USD = 0.01;
+// Settlement-posture bands for get_tokenized_settlement_context — named
+// to match the Python twin's CATO_POSTURE_* constants (cato_client.py).
+// There is no doctrine "monitor" gas threshold independent of this one;
+// it exists so the posture tool can show an early-warning band ahead of
+// the hard HOLD_THRESHOLD, and it must have the same one home every
+// other doctrine constant does.
+const CATO_POSTURE_MONITOR_GAS = 30.0;
+
+/**
+ * True only for a real, finite number — the one shape a systemic-stress
+ * reading must have to be usable. NaN (e.g. parseFloat(".") on a FRED
+ * "missing observation" marker), +/-Infinity, null, undefined, and
+ * non-numeric types all fail this. A caller must never default a failed
+ * check here to a value that reads as "clear" (see 2026-08-21 audit: a
+ * missing OFR reading silently cleared the gate via `?? "0"`).
+ */
+function isUsableStressReading(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 /**
  * Pure Cato gate decision. Inputs:
- *   ofr_stress     — OFR STLFSI4 value (number; callers pass 0 if unknown)
+ *   ofr_stress     — OFR STLFSI4 value; must be a finite number to be
+ *                    usable (see isUsableStressReading). An unusable
+ *                    reading HOLDs — it never falls through to PROCEED.
  *   gas_gwei       — ETH L1 gas in gwei, or null/undefined if unavailable
  *   sofr_delta_bps — |SOFR(t) − SOFR(t−1)| × 100, or null if unavailable
  */
@@ -43,6 +64,20 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
   const reasons = [];
   let gate_decision = "PROCEED";
   let recommended_rail = "atomic";
+
+  // Check 0 — the reading has to exist before it can be measured against
+  // anything. NaN and +/-Infinity fail every comparison below, which is
+  // exactly how a missing feed used to clear the gate silently.
+  if (!isUsableStressReading(ofr_stress)) {
+    return {
+      gate_decision: "HOLD",
+      reasons: [
+        `OFR stress reading is not a usable number (got ${JSON.stringify(ofr_stress)}) — ` +
+          "feed missing or malformed; holding rather than assuming clear",
+      ],
+      recommended_rail: "traditional",
+    };
+  }
 
   // ESCALATE first — systemic stress overrides everything
   if (ofr_stress > CATO_OFR_ESCALATE_THRESHOLD) {
@@ -116,6 +151,8 @@ module.exports = {
   CATO_GAS_GWEI_HOLD_THRESHOLD,
   CATO_SOFR_DELTA_HOLD_BPS,
   CATO_ULTRA_LOW_FEE_USD,
+  CATO_POSTURE_MONITOR_GAS,
+  isUsableStressReading,
   computeGateDecision,
   pickRecommendedChain,
 };

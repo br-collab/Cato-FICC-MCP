@@ -24,6 +24,9 @@ jobs:
       - name: Syntax check
         run: node --check index.js
 
+      - name: Gate core golden vectors
+        run: npm test
+
       - name: Cold boot + MCP tools/list roundtrip
         run: |
           printf '%s\n' \
