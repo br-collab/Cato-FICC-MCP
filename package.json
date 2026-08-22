@@ -1,7 +1,7 @@
 {
   "name": "cato-ficc-mcp",
-  "version": "0.3.0",
-  "description": "Read-only MCP server for FICC market data — NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR. Advisory use only; no tool routes or settles a trade. v0.3.0 adds the XRPL settlement rail (live fee state via public JSON-RPC, deterministic-finality routing preference); v0.2.3 added sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
+  "version": "0.3.1",
+  "description": "Read-only MCP server for FICC market data — NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR. Advisory use only; no tool routes or settles a trade. v0.3.1 holds the gate when the systemic-stress reading is missing or non-finite, instead of reporting all thresholds clear; v0.3.0 adds the XRPL settlement rail (live fee state via public JSON-RPC, deterministic-finality routing preference); v0.2.3 added sticky CoinGecko price cache; v0.2.2 restored the SOFR 1-day delta funding-shock detector validated against the September 2019 repo spike.",
   "main": "index.js",
   "bin": { "cato-ficc-mcp": "./index.js" },
   "scripts": { "start": "node index.js", "test": "node test/gate_core.test.js" },
