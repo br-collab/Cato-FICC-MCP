@@ -81,6 +81,13 @@ const ETH_PRICE_FALLBACK = 3500;   // USD per ETH — CoinGecko cold-boot fallba
 const SOL_PRICE_FALLBACK = 150;    // USD per SOL — CoinGecko cold-boot fallback
 const XRP_PRICE_FALLBACK = 2.50;   // USD per XRP — CoinGecko cold-boot fallback (v0.3.0)
 
+// Declared cost-model parameters for the FICC traditional rail. Not
+// published FICC statistics. See README "Cost model — a parameterized
+// proxy". Mirrored in aureon/mcp/cato_client.py; both are echoed back in
+// the `inputs` field of every compare_settlement_rails response.
+const FICC_CLEARING_FEE_BPS = 0.5;
+const FICC_NETTING_BENEFIT_PCT = 40;
+
 // v0.2.3 sticky last-known-good price cache. Updated on every
 // successful getLivePrices() call. Read on failure so transient
 // CoinGecko hiccups (rate limit, network blip) degrade to a
@@ -414,9 +421,14 @@ async function multichainGas(prices) {
 // for rails without live data so the caller can exclude them from ranking.
 // evmL1Cost and solanaCost take their respective live prices as params.
 function ficcCost(notionalUsd, sofrPct, termDays) {
-  // 0.5 bps clearing fee net of 40% netting benefit, annualized to term,
-  // plus cost of capital at SOFR for the term.
-  const clearing = notionalUsd * 0.00005 * 0.6 * (termDays / 360);
+  // FICC_CLEARING_FEE_BPS clearing fee net of FICC_NETTING_BENEFIT_PCT
+  // netting benefit, annualized to term, plus cost of capital at SOFR for
+  // the term.
+  const clearing =
+    notionalUsd *
+    (FICC_CLEARING_FEE_BPS / 10000) *
+    (1 - FICC_NETTING_BENEFIT_PCT / 100) *
+    (termDays / 360);
   const coc = notionalUsd * (sofrPct / 100) * (termDays / 360);
   return clearing + coc;
 }
@@ -599,7 +611,7 @@ const TOOLS = [
   },
   {
     name: "compare_settlement_rails",
-    description: "Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana, XRPL) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: 0.5bps clearing fee net of 40% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × live ETH price. Solana: (base 5000 + median priority) lamports × live SOL price. XRPL: max(open_ledger_fee, base_fee) drops × 1e-6 × live XRP price (~4s deterministic finality). Advisory ranking logic respects OFR stress (forces FICC), SOFR delta shocks (forces FICC), and gas spikes (forces FICC) before rail selection; at equal ultra-low cost XRPL is preferred over Solana on deterministic-finality grounds (v0.3.0 doctrine). Does not route or settle any trade.",
+    description: `Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana, XRPL) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: ${FICC_CLEARING_FEE_BPS}bps clearing fee net of ${FICC_NETTING_BENEFIT_PCT}% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × live ETH price. Solana: (base 5000 + median priority) lamports × live SOL price. XRPL: max(open_ledger_fee, base_fee) drops × 1e-6 × live XRP price (~4s deterministic finality). Advisory ranking logic respects OFR stress (forces FICC), SOFR delta shocks (forces FICC), and gas spikes (forces FICC) before rail selection; at equal ultra-low cost XRPL is preferred over Solana on deterministic-finality grounds (v0.3.0 doctrine). Does not route or settle any trade.`,
     inputSchema: { type: "object", properties: {
       notional_usd: { type: "number", description: "Notional trade size in USD" },
       term_days: { type: "number", description: "Settlement term in days (default 1 for overnight repo)", default: 1 }
@@ -1095,7 +1107,12 @@ async function handleTool(name, args) {
           cost_usd: +ficc_cost.toFixed(4),
           speed: "T+1",
           status: "live",
-          inputs: { sofr_pct: sofr, term_days, clearing_fee_bps: 0.5, netting_benefit_pct: 40 },
+          inputs: {
+            sofr_pct: sofr,
+            term_days,
+            clearing_fee_bps: FICC_CLEARING_FEE_BPS,
+            netting_benefit_pct: FICC_NETTING_BENEFIT_PCT,
+          },
         },
         ethereum_l1: {
           cost_usd: eth_cost !== null ? +eth_cost.toFixed(4) : null,
