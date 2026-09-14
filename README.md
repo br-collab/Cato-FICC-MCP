@@ -27,6 +27,17 @@ and pre-trade control.
 - `get_atomic_settlement_gate` — Verana L0 multi-chain doctrine gate. Returns
   `PROCEED` / `HOLD` / `ESCALATE` plus `recommended_chain`.
 
+> **Naming — two gates called Cato.** The gates in this repository
+> (`cato_gate` for pre-settlement doctrine context, `get_atomic_settlement_gate`
+> for `PROCEED` / `HOLD` / `ESCALATE` plus a recommended chain) govern the
+> securities and tokenized settlement rail, and are public MCP tools. `CATO-F`,
+> in [br-collab/Project-Atreides](https://github.com/br-collab/Project-Atreides)
+> (`atreides/rails/cato_f.py`), is a separate in-process gate for the **cash**
+> settlement rail; it emits `PROCEED` / `HOLD` / `ESCALATE` with a rail and a
+> finality class. The two are designed as counterparts and share the same OFR
+> STLFSI4 stress thresholds, but they are different components answering
+> different questions on different surfaces. Not interchangeable.
+
 ### Settlement Rails
 
 - `compare_settlement_rails` — All-in cost across FICC traditional,
