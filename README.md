@@ -194,6 +194,28 @@ mirrored change to the Python twin (`aureon/mcp/cato_client.py`); see
 | **XRPL** | ~4s (deterministic finality) | ~10-15 drops ≈ $0.00003, `fee` method via public JSON-RPC | Live (v0.3.0) |
 | **Fed L1 / PORTS** | Instant | TBD | Not yet issued (hypothetical) |
 
+### Cost model — a parameterized proxy, not clearing economics
+
+FICC traditional cost is a declared proxy. It applies a 0.5 bps clearing fee
+against notional net of an assumed 40% netting benefit, annualized to the
+term, plus SOFR cost-of-capital for the term. The 40% figure is a declared
+assumption, not a published FICC statistic and not an estimate of FICC's
+actual netting efficiency. The parameter exists to make the traditional rail's
+cost explicit and adjustable, not to predict it. Note the direction: if actual
+netting efficiency exceeds 40%, this overstates FICC cost and biases the
+comparison against the traditional rail.
+
+Both parameters are returned in the `inputs` field of every
+`compare_settlement_rails` response, so a caller can always see what produced a
+ranking. They are constants in `index.js` (`FICC_CLEARING_FEE_BPS`,
+`FICC_NETTING_BENEFIT_PCT`), applied in `ficcCost` and echoed in that `inputs`
+field — parameters, not findings. Change them and the ranking moves. The
+Python twin carries the same two constants in `aureon/mcp/cato_client.py`.
+
+What this server does **not** model: Value-at-Risk-based clearing fund margin,
+the capped contingency liquidity facility, or netting resolved at instrument
+level.
+
 > **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**
 
 ### Fed L1 / PORTS notes
