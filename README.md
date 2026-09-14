@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.3.0.
+v0.3.1.
 
 ## Why "Cato"
 
@@ -26,6 +26,17 @@ and pre-trade control.
   OFR stress, fed liquidity posture.
 - `get_atomic_settlement_gate` — Verana L0 multi-chain doctrine gate. Returns
   `PROCEED` / `HOLD` / `ESCALATE` plus `recommended_chain`.
+
+> **Naming — two gates called Cato.** The gates in this repository
+> (`cato_gate` for pre-settlement doctrine context, `get_atomic_settlement_gate`
+> for `PROCEED` / `HOLD` / `ESCALATE` plus a recommended chain) govern the
+> securities and tokenized settlement rail, and are public MCP tools. `CATO-F`,
+> in [br-collab/Project-Atreides](https://github.com/br-collab/Project-Atreides)
+> (`atreides/rails/cato_f.py`), is a separate in-process gate for the **cash**
+> settlement rail; it emits `PROCEED` / `HOLD` / `ESCALATE` with a rail and a
+> finality class. The two are designed as counterparts and share the same OFR
+> STLFSI4 stress thresholds, but they are different components answering
+> different questions on different surfaces. Not interchangeable.
 
 ### Settlement Rails
 
@@ -143,11 +154,34 @@ decide. The server exposes read-only market data and deterministic governance
 gate evaluations; no tool can initiate, route, or release a settlement. The
 doctrine emitted here (`PROCEED` / `HOLD` / `ESCALATE`, plus a
 `recommended_chain`) is advisory input to a human authority gate (CAOM-001),
-not an execution path. The same doctrine is implemented twice — once here in
-JavaScript as a public MCP server, and once inside Aureon as an in-process
-Python twin — and both implementations are required to produce bit-for-bit
-identical decisions for identical inputs. The parity is what lets the gate
-be relied on regardless of caller.
+not an execution path. The same doctrine is implemented twice — here in
+JavaScript as a public MCP server, and inside Aureon as an in-process Python
+twin (`aureon/mcp/cato_client.py`). **Bit-for-bit identical decisions for
+identical inputs is a stated requirement of the doctrine, not an automatically
+guaranteed property.** Parity is maintained by mirroring every decision-core
+change as a doctrine event in the same changeset; each such event ships a
+mirror spec (see `PARITY_XRPL.md`).
+
+**Current parity status** (13 Sep 2026):
+
+- **XRPL routing (v0.3.0) — diverges.** This server's chain picker prefers
+  XRPL when its fee is under $0.01; the Python twin has no XRPL branch. On the
+  same chain state (XRPL fee $0.00003, Solana $0.0004, Base 0.01 gwei,
+  Ethereum 0.5 gwei) this server recommends `xrpl` and the twin recommends
+  `solana`. The mirror spec is `PARITY_XRPL.md`; it has not landed. Tracked in
+  [br-collab/aureon#9](https://github.com/br-collab/aureon/issues/9).
+- **Unusable stress reading (v0.3.1) — mirrored.** A missing, NaN or infinite
+  OFR STLFSI4 reading holds the gate on both sides (golden vector V16).
+- **How it is checked.** `parity/run_parity.py` in
+  [br-collab/aureon](https://github.com/br-collab/aureon) drives this
+  repository's `gate_core.js` against the twin on 17 golden vectors. Sixteen
+  pass. The seventeenth, V17, reproduces the XRPL divergence above and is
+  marked KNOWN-FAILING: it is reported on every run, and the build fails if it
+  starts passing before its marker is removed. The harness runs in CI in both
+  repositories (`.github/workflows/parity.yml`), added in
+  [`63addba`](https://github.com/br-collab/Cato-FICC-MCP/commit/63addba7361e30c20d9efab968ae5000a1b81785) here and
+  [`810b9b3`](https://github.com/br-collab/aureon/commit/810b9b3459f4f79621b6a3d13b8190939069befe) in aureon. It covers only what the vectors
+  exercise.
 
 ## Routing Doctrine
 
@@ -178,9 +212,10 @@ close and a fee of typically 10-15 drops (~$0.00003). Solana is 10× faster
 finality certainty is not. XRPL's own incident record (one 64-minute
 consensus stall, Feb 4-5, 2025, no loss of user assets) is disclosed in
 `xrpl_note` — the preference is earned on the merits, not granted by
-exemption. Per the parity principle, this doctrine change ships with a
-mirrored change to the Python twin (`aureon/mcp/cato_client.py`); see
-`PARITY_XRPL.md`.
+exemption. Per the parity principle, this doctrine change requires a
+mirrored change to the Python twin (`aureon/mcp/cato_client.py`), specified
+in `PARITY_XRPL.md`. **That mirror has not landed** — the twin diverges at
+this step of the chain picker; see *Current parity status* under Architecture.
 
 ### Settlement Rails
 
@@ -193,6 +228,28 @@ mirrored change to the Python twin (`aureon/mcp/cato_client.py`); see
 | **Solana** | ~400ms | ~$0.001 per settlement, `getRecentPrioritizationFees` via public RPC | Experimental |
 | **XRPL** | ~4s (deterministic finality) | ~10-15 drops ≈ $0.00003, `fee` method via public JSON-RPC | Live (v0.3.0) |
 | **Fed L1 / PORTS** | Instant | TBD | Not yet issued (hypothetical) |
+
+### Cost model — a parameterized proxy, not clearing economics
+
+FICC traditional cost is a declared proxy. It applies a 0.5 bps clearing fee
+against notional net of an assumed 40% netting benefit, annualized to the
+term, plus SOFR cost-of-capital for the term. The 40% figure is a declared
+assumption, not a published FICC statistic and not an estimate of FICC's
+actual netting efficiency. The parameter exists to make the traditional rail's
+cost explicit and adjustable, not to predict it. Note the direction: if actual
+netting efficiency exceeds 40%, this overstates FICC cost and biases the
+comparison against the traditional rail.
+
+Both parameters are returned in the `inputs` field of every
+`compare_settlement_rails` response, so a caller can always see what produced a
+ranking. They are constants in `index.js` (`FICC_CLEARING_FEE_BPS`,
+`FICC_NETTING_BENEFIT_PCT`), applied in `ficcCost` and echoed in that `inputs`
+field — parameters, not findings. Change them and the ranking moves. The
+Python twin carries the same two constants in `aureon/mcp/cato_client.py`.
+
+What this server does **not** model: Value-at-Risk-based clearing fund margin,
+the capped contingency liquidity facility, or netting resolved at instrument
+level.
 
 > **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**
 
