@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.3.0.
+v0.3.1.
 
 ## Why "Cato"
 
@@ -154,11 +154,34 @@ decide. The server exposes read-only market data and deterministic governance
 gate evaluations; no tool can initiate, route, or release a settlement. The
 doctrine emitted here (`PROCEED` / `HOLD` / `ESCALATE`, plus a
 `recommended_chain`) is advisory input to a human authority gate (CAOM-001),
-not an execution path. The same doctrine is implemented twice — once here in
-JavaScript as a public MCP server, and once inside Aureon as an in-process
-Python twin — and both implementations are required to produce bit-for-bit
-identical decisions for identical inputs. The parity is what lets the gate
-be relied on regardless of caller.
+not an execution path. The same doctrine is implemented twice — here in
+JavaScript as a public MCP server, and inside Aureon as an in-process Python
+twin (`aureon/mcp/cato_client.py`). **Bit-for-bit identical decisions for
+identical inputs is a stated requirement of the doctrine, not an automatically
+guaranteed property.** Parity is maintained by mirroring every decision-core
+change as a doctrine event in the same changeset; each such event ships a
+mirror spec (see `PARITY_XRPL.md`).
+
+**Current parity status** (13 Sep 2026):
+
+- **XRPL routing (v0.3.0) — diverges.** This server's chain picker prefers
+  XRPL when its fee is under $0.01; the Python twin has no XRPL branch. On the
+  same chain state (XRPL fee $0.00003, Solana $0.0004, Base 0.01 gwei,
+  Ethereum 0.5 gwei) this server recommends `xrpl` and the twin recommends
+  `solana`. The mirror spec is `PARITY_XRPL.md`; it has not landed. Tracked in
+  [br-collab/aureon#9](https://github.com/br-collab/aureon/issues/9).
+- **Unusable stress reading (v0.3.1) — mirrored.** A missing, NaN or infinite
+  OFR STLFSI4 reading holds the gate on both sides (golden vector V16).
+- **How it is checked.** `parity/run_parity.py` in
+  [br-collab/aureon](https://github.com/br-collab/aureon) drives this
+  repository's `gate_core.js` against the twin on 17 golden vectors. Sixteen
+  pass. The seventeenth, V17, reproduces the XRPL divergence above and is
+  marked KNOWN-FAILING: it is reported on every run, and the build fails if it
+  starts passing before its marker is removed. The harness runs in CI in both
+  repositories (`.github/workflows/parity.yml`), added in
+  [`63addba`](https://github.com/br-collab/Cato-FICC-MCP/commit/63addba7361e30c20d9efab968ae5000a1b81785) here and
+  [`810b9b3`](https://github.com/br-collab/aureon/commit/810b9b3459f4f79621b6a3d13b8190939069befe) in aureon. It covers only what the vectors
+  exercise.
 
 ## Routing Doctrine
 
@@ -189,9 +212,10 @@ close and a fee of typically 10-15 drops (~$0.00003). Solana is 10× faster
 finality certainty is not. XRPL's own incident record (one 64-minute
 consensus stall, Feb 4-5, 2025, no loss of user assets) is disclosed in
 `xrpl_note` — the preference is earned on the merits, not granted by
-exemption. Per the parity principle, this doctrine change ships with a
-mirrored change to the Python twin (`aureon/mcp/cato_client.py`); see
-`PARITY_XRPL.md`.
+exemption. Per the parity principle, this doctrine change requires a
+mirrored change to the Python twin (`aureon/mcp/cato_client.py`), specified
+in `PARITY_XRPL.md`. **That mirror has not landed** — the twin diverges at
+this step of the chain picker; see *Current parity status* under Architecture.
 
 ### Settlement Rails
 
