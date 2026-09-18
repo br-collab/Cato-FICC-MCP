@@ -53,6 +53,20 @@ function isUsableStressReading(value) {
 }
 
 /**
+ * One FRED observation — or its absence — to a stress reading. A failed
+ * fetch leaves no observation, which yields null; a present value is
+ * parsed as-is, so FRED's "." marker still yields NaN. Both then fail
+ * isUsableStressReading and HOLD. It never substitutes a number for a
+ * reading it does not have: the gate handler's `value ?? "0"` turned a
+ * FRED outage into PROCEED / "All doctrine thresholds clear"
+ * (br-collab/aureon#12).
+ */
+function stressReadingFromObservation(observation) {
+  const raw = observation ? observation.value : undefined;
+  return raw !== undefined && raw !== null ? parseFloat(raw) : null;
+}
+
+/**
  * Pure Cato gate decision. Inputs:
  *   ofr_stress     — OFR STLFSI4 value; must be a finite number to be
  *                    usable (see isUsableStressReading). An unusable
@@ -153,6 +167,7 @@ module.exports = {
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
   isUsableStressReading,
+  stressReadingFromObservation,
   computeGateDecision,
   pickRecommendedChain,
 };
