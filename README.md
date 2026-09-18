@@ -162,7 +162,7 @@ guaranteed property.** Parity is maintained by mirroring every decision-core
 change as a doctrine event in the same changeset; each such event ships a
 mirror spec (see `PARITY_XRPL.md`).
 
-**Current parity status** (13 Sep 2026):
+**Current parity status** (14 Sep 2026):
 
 - **XRPL routing (v0.3.0) — diverges.** This server's chain picker prefers
   XRPL when its fee is under $0.01; the Python twin has no XRPL branch. On the
@@ -170,8 +170,20 @@ mirror spec (see `PARITY_XRPL.md`).
   Ethereum 0.5 gwei) this server recommends `xrpl` and the twin recommends
   `solana`. The mirror spec is `PARITY_XRPL.md`; it has not landed. Tracked in
   [br-collab/aureon#9](https://github.com/br-collab/aureon/issues/9).
-- **Unusable stress reading (v0.3.1) — mirrored.** A missing, NaN or infinite
-  OFR STLFSI4 reading holds the gate on both sides (golden vector V16).
+- **Unusable stress reading (v0.3.1) — partially mirrored.** A NaN, infinite or
+  malformed OFR STLFSI4 reading holds the gate on both sides (golden vector
+  V16). A failed fetch does not: this server substitutes 0 for a reading it
+  could not retrieve and proceeds, and in aureon the Python twin is never
+  handed an unusable reading because a proxy fills the gap. Tracked in
+  [br-collab/aureon#12](https://github.com/br-collab/aureon/issues/12).
+- **Stress index (all versions) — inputs diverge in production.** The Node
+  gate reads FRED STLFSI4; the Python twin and the pre-trade policy engine
+  read the OFR Financial Stress Index, or a proxy computed from VIX,
+  high-yield spreads and the yield curve when that feed is unavailable. The
+  golden vectors supply identical inputs to both sides, so parity holds
+  under test; in production the two are fed different series, and the
+  0.5/1.0 thresholds were backtested on STLFSI4 only. Tracked in
+  [br-collab/aureon#11](https://github.com/br-collab/aureon/issues/11).
 - **How it is checked.** `parity/run_parity.py` in
   [br-collab/aureon](https://github.com/br-collab/aureon) drives this
   repository's `gate_core.js` against the twin on 17 golden vectors. Sixteen
