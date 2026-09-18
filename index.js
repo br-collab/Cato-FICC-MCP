@@ -117,6 +117,7 @@ const {
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
   isUsableStressReading,
+  stressReadingFromObservation,
   computeGateDecision,
   pickRecommendedChain,
 } = require("./gate_core.js");
@@ -1243,8 +1244,10 @@ async function handleTool(name, args) {
         fredSeries("SOFR", 2),
       ]);
 
-      const ofr_stress = parseFloat(
-        gateContext?.systemic_stress?.ofr_stress_index?.value ?? "0"
+      // A failed FRED fetch leaves no observation: that is an unusable
+      // reading and the gate HOLDs. It is not 0 (br-collab/aureon#12).
+      const ofr_stress = stressReadingFromObservation(
+        gateContext?.systemic_stress?.ofr_stress_index
       );
       const gas_gwei = settlementContext?.gas_gwei;
 

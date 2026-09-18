@@ -21,7 +21,7 @@
  */
 
 const assert = require("assert");
-const { computeGateDecision, pickRecommendedChain } = require("../gate_core.js");
+const { computeGateDecision, pickRecommendedChain, stressReadingFromObservation } = require("../gate_core.js");
 
 const VECTORS = [
   { id: "all_clear", ofr_stress: 0.20, gas_gwei: 20.0, sofr_delta_bps: 2.0, expect: { gate_decision: "PROCEED", recommended_rail: "atomic" } },
@@ -69,6 +69,32 @@ for (const v of VECTORS) {
   }
 }
 
+// Ingest: a FRED observation, or its absence, through
+// stressReadingFromObservation and then the decision core. A failed fetch
+// leaves no observation and must HOLD; it used to reach the gate as 0 via
+// `value ?? "0"` and PROCEED (br-collab/aureon#12).
+const INGEST = [
+  { id: "ingest_fetch_failed_no_observation", observation: undefined, expect: "HOLD" },
+  { id: "ingest_observation_value_null", observation: { date: "2026-09-11", value: null }, expect: "HOLD" },
+  { id: "ingest_missing_marker_dot", observation: { date: "2026-09-11", value: "." }, expect: "HOLD" },
+  { id: "ingest_value_0_20", observation: { date: "2026-09-11", value: "0.20" }, expect: "PROCEED" },
+  { id: "ingest_value_1_20", observation: { date: "2026-09-11", value: "1.20" }, expect: "ESCALATE" },
+];
+for (const v of INGEST) {
+  const d = computeGateDecision({
+    ofr_stress: stressReadingFromObservation(v.observation),
+    gas_gwei: 20.0,
+    sofr_delta_bps: 0.0,
+  });
+  try {
+    assert.strictEqual(d.gate_decision, v.expect, `${v.id}: gate_decision`);
+    console.log(`PASS  ${v.id}`);
+  } catch (err) {
+    failures++;
+    console.error(`FAIL  ${v.id}: ${err.message} (got ${d.gate_decision})`);
+  }
+}
+
 // pickRecommendedChain sanity check — not a doctrine boundary, just
 // confirms the picker resolves against a live chain_state.
 const chain = pickRecommendedChain(CHAIN_STATE);
@@ -85,4 +111,4 @@ if (failures) {
   console.error(`${failures} vector(s) failed.`);
   process.exit(1);
 }
-console.log(`${VECTORS.length + 1} vector(s) passed.`);
+console.log(`${VECTORS.length + INGEST.length + 1} vector(s) passed.`);
