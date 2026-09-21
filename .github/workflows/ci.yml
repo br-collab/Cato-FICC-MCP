@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every pull request, whatever it targets. Filtering on `branches: [main]` meant a
+  # pull request based on another branch — a stacked one, say — got no checks at all:
+  # not a failure and no red mark, simply nothing to see. parity.yml in this
+  # repository already triggers on every pull request; this brings ci.yml into line.
   pull_request:
-    branches: [main]
 
 jobs:
   validate:
