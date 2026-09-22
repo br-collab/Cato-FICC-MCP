@@ -30,25 +30,25 @@ permissions:
 
 jobs:
   parity:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out the harness and Python twin (aureon)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: br-collab/aureon
           ref: ${{ inputs.aureon_ref || 'main' }}
           path: aureon
 
       - name: Check out this repository where the harness expects it
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: aureon/cato-mcp
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 

@@ -3,17 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every pull request, whatever it targets. Filtering on `branches: [main]` meant a
+  # pull request based on another branch — a stacked one, say — got no checks at all:
+  # not a failure and no red mark, simply nothing to see. parity.yml in this
+  # repository already triggers on every pull request; this brings ci.yml into line.
   pull_request:
-    branches: [main]
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Use Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
