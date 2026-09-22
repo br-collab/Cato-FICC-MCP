@@ -162,15 +162,20 @@ decide. The server exposes read-only market data and deterministic governance
 gate evaluations; no tool can initiate, route, or release a settlement. The
 doctrine emitted here (`PROCEED` / `HOLD` / `ESCALATE`, plus a
 `recommended_chain`) is advisory input to a human authority gate (CAOM-001),
-not an execution path. The same doctrine is implemented twice — here in
-JavaScript as a public MCP server, and inside Aureon as an in-process Python
-twin (`aureon/mcp/cato_client.py`). **Bit-for-bit identical decisions for
-identical inputs is a stated requirement of the doctrine, not an automatically
-guaranteed property.** Parity is maintained by mirroring every decision-core
-change as a doctrine event in the same changeset; each such event ships a
-mirror spec (see `PARITY_XRPL.md`).
+not an execution path. Related decision logic is implemented independently
+here in JavaScript and inside Aureon in Python
+(`aureon/mcp/cato_client.py`). Identical decisions for identical inputs are a
+compatibility target, not a current property. The audit compares golden vectors
+and detects undeclared drift; it does not prove that production inputs or all
+outputs are equivalent.
 
-**Current parity status** (14 Sep 2026):
+**Current compatibility status: INCOMPATIBLE.**
+[`COMPATIBILITY_STATUS.json`](COMPATIBILITY_STATUS.json) is the machine-readable
+source of truth. It records the open XRPL decision-output difference and the
+different production stress series. A CI test fails if the published claim is
+made greener while either difference remains unresolved.
+
+**Current compatibility detail** (verified 22 Sep 2026):
 
 - **XRPL routing (v0.3.0) — diverges.** This server's chain picker prefers
   XRPL when its fee is under $0.01; the Python twin has no XRPL branch. On the
@@ -178,11 +183,11 @@ mirror spec (see `PARITY_XRPL.md`).
   Ethereum 0.5 gwei) this server recommends `xrpl` and the twin recommends
   `solana`. The mirror spec is `PARITY_XRPL.md`; it has not landed. Tracked in
   [br-collab/aureon#9](https://github.com/br-collab/aureon/issues/9).
-- **Unusable stress reading (v0.3.1) — partially mirrored.** A NaN, infinite or
-  malformed OFR STLFSI4 reading holds the gate on both sides (golden vector
-  V16). A failed fetch does not: this server substitutes 0 for a reading it
-  could not retrieve and proceeds, and in aureon the Python twin is never
-  handed an unusable reading because a proxy fills the gap. Tracked in
+- **Unusable stress reading (v0.3.1) — production inputs still differ.** A NaN,
+  infinite, malformed or missing STLFSI4 observation holds this server's gate.
+  In aureon the Python implementation is instead handed a finite proxy when its
+  source is unavailable, so its usability guard does not see an absent reading.
+  The original finding is recorded in
   [br-collab/aureon#12](https://github.com/br-collab/aureon/issues/12).
 - **Stress index (all versions) — inputs diverge in production.** The Node
   gate reads FRED STLFSI4; the Python twin and the pre-trade policy engine

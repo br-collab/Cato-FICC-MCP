@@ -1,10 +1,9 @@
 /**
  * gate_core.js — Cato decision core (pure, no I/O)
  * =================================================
- * WS-0.2 (AUR-ROADMAP-001): the Parity Principle requires the external
- * Node MCP server and the in-process Python twin
- * (aureon/mcp/cato_client.py::atomic_settlement_gate) to produce
- * bit-for-bit identical DECISIONS for identical inputs. Parity drifted
+ * WS-0.2 (AUR-ROADMAP-001): the external Node MCP server and the in-process
+ * Python implementation target the same decisions for identical inputs.
+ * Compatibility currently has declared gaps (COMPATIBILITY_STATUS.json); it drifted
  * because this logic lived inline in the index.js tool handler, behind
  * live fetches, where it could not be driven by a test vector.
  *
@@ -15,7 +14,8 @@
  *     → "solana" | "base" | "ethereum" | null
  *
  * index.js requires this module (single source of truth for thresholds),
- * and parity/run_parity.py drives it with the golden vectors. Any change
+ * and parity/run_parity.py drives it with golden vectors. That audit detects
+ * undeclared drift but is not a compatibility certification. Any change
  * to this file is a doctrine event (Cato thresholds are doctrine, not
  * configuration) and must be mirrored in the Python twin in the same
  * change set.

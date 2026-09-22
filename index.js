@@ -99,10 +99,9 @@ let _lastLivePrices = {
   ts: 0,         // Date.now() of last successful fetch
 };
 
-// Doctrine thresholds — mirror aureon/mcp/cato_client.py exactly. The
-// parity principle (hard rule) says these must be identical across the
-// MCP server and the Python twin so the gate produces the same decision
-// regardless of caller. v0.2.2 restores the SOFR delta trigger that was
+// Doctrine thresholds target alignment with aureon/mcp/cato_client.py.
+// Decision outputs and production inputs currently have declared differences;
+// COMPATIBILITY_STATUS.json is authoritative. v0.2.2 restores the SOFR delta trigger that was
 // in the v0.1.0 spec but silently dropped during the v0.2.0 refactor.
 // WS-0.2 (AUR-ROADMAP-001): the decision core now lives in gate_core.js
 // — a pure, I/O-free module — so the parity harness
