@@ -31,7 +31,9 @@ permissions:
   contents: read
 
 jobs:
-  compatibility-audit:
+  # Keep this identifier stable: branch protection requires the `parity` check.
+  # The workflow and step names explain that the check is an audit, not certification.
+  parity:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the harness and Python twin (aureon)
