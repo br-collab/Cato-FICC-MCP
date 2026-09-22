@@ -4,7 +4,7 @@ Thank you for looking. A note on what this repository is, before anything else.
 
 ## What this is
 
-Cato-FICC-MCP is a Model Context Protocol server exposing fixed-income and settlement
+Cato Sec (`cato_sec`) is a Model Context Protocol server exposing fixed-income and settlement
 reference tools, and the Node decision core the Cannae Legion parity harness scores a
 Python twin against. It is started by the client over stdio and serves no HTTP.
 

@@ -19,7 +19,7 @@ assert.ok(Array.isArray(status.differences), "differences must be an array");
 assert.ok(status.differences.length > 0, "an incompatible status must name its differences");
 
 const open = status.differences.filter((difference) => difference.resolved === false);
-assert.ok(open.length > 0, "recorded Cato/aureon gaps must remain explicit until resolved");
+assert.ok(open.length > 0, "recorded Cato Sec/aureon gaps must remain explicit until resolved");
 assert.strictEqual(
   status.status,
   "INCOMPATIBLE",

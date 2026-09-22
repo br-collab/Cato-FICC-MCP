@@ -41,18 +41,23 @@ jobs:
           node -e '
             const fs = require("fs");
             const lines = fs.readFileSync("/tmp/stdout.log","utf8").trim().split("\n");
-            let count = 0;
+            let tools = [];
             for (const l of lines) {
               try {
                 const m = JSON.parse(l);
                 if (m.id === 2 && m.result && m.result.tools) {
-                  count = m.result.tools.length;
+                  tools = m.result.tools;
                 }
               } catch(e){}
             }
-            if (count !== 23) {
-              console.error("FAIL: expected 23 tools, got " + count);
+            if (tools.length !== 23) {
+              console.error("FAIL: expected 23 tools, got " + tools.length);
               process.exit(1);
             }
-            console.log("PASS: " + count + " tools returned via MCP tools/list");
+            const names = tools.map((tool) => tool.name);
+            if (!names.includes("cato_sec") || names.includes("cato_gate")) {
+              console.error("FAIL: expected canonical cato_sec tool only");
+              process.exit(1);
+            }
+            console.log("PASS: " + tools.length + " tools returned with canonical cato_sec identity");
           '

@@ -1,5 +1,5 @@
 /**
- * gate_core.js — Cato decision core (pure, no I/O)
+ * gate_core.js — Cato Sec decision core (pure, no I/O)
  * =================================================
  * WS-0.2 (AUR-ROADMAP-001): the external Node MCP server and the in-process
  * Python implementation target the same decisions for identical inputs.
@@ -16,14 +16,14 @@
  * index.js requires this module (single source of truth for thresholds),
  * and parity/run_parity.py drives it with golden vectors. That audit detects
  * undeclared drift but is not a compatibility certification. Any change
- * to this file is a doctrine event (Cato thresholds are doctrine, not
+ * to this file is a doctrine event (Cato Sec thresholds are doctrine, not
  * configuration) and must be mirrored in the Python twin in the same
  * change set.
  *
  * No dependencies. CommonJS, matching index.js.
  */
 
-// Doctrine thresholds (Duffie 2025, Brookings; Cato v0.2.2 backtest).
+// Doctrine thresholds (Duffie 2025, Brookings; Cato Sec v0.2.2 backtest).
 const CATO_OFR_ESCALATE_THRESHOLD = 1.0;
 const CATO_OFR_HOLD_THRESHOLD = 0.5;
 const CATO_GAS_GWEI_HOLD_THRESHOLD = 50.0;
@@ -67,7 +67,7 @@ function stressReadingFromObservation(observation) {
 }
 
 /**
- * Pure Cato gate decision. Inputs:
+ * Pure Cato Sec gate decision. Inputs:
  *   ofr_stress     — OFR STLFSI4 value; must be a finite number to be
  *                    usable (see isUsableStressReading). An unusable
  *                    reading HOLDs — it never falls through to PROCEED.
@@ -138,7 +138,7 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
  * cost the picker prefers deterministic finality over raw speed: an XRPL
  * ledger close (~4s) is final when validated — no probabilistic
  * confirmation window — while Solana's 400ms edge carries the 2022-2023
- * outage history already flagged in Cato's own solana_note (plus the
+ * outage history already flagged in Cato Sec's own solana_note (plus the
  * 64-minute consensus stall XRPL itself logged on Feb 4-5, 2025, which
  * is why XRPL gets a preference, not an exemption from doctrine). For
  * institutional DvP settlement, certainty of finality is worth more than
