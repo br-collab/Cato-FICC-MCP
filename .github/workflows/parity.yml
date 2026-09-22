@@ -1,6 +1,6 @@
-name: Cato parity
+name: Cato compatibility audit
 
-# Runs the parity harness that lives in br-collab/aureon
+# Runs the compatibility harness that lives in br-collab/aureon
 # (parity/run_parity.py): this repository's gate_core.js — the exact decision
 # core index.js executes — against the in-process Python twin
 # (aureon/mcp/cato_client.py), on the golden vectors. Mirrored by
@@ -10,8 +10,10 @@ name: Cato parity
 # aureon is checked out at `main` by default, not pinned: the question this
 # job answers is whether the two repositories as they stand agree. The daily
 # run catches a twin change landing on the aureon side with no Cato push.
-# Exit codes: 0 parity holds (known-failing vectors disclosed, not hidden),
-# 1 parity violated, 2 not assessed — all non-zero codes fail the job.
+# This is not a compatibility certification: declared known-failing vectors and
+# production-input differences keep COMPATIBILITY_STATUS.json INCOMPATIBLE.
+# Exit code 0 means no undeclared drift; 1 means unexpected drift; 2 means not
+# assessed. All non-zero codes fail the job.
 
 on:
   push:
@@ -29,6 +31,8 @@ permissions:
   contents: read
 
 jobs:
+  # Keep this identifier stable: branch protection requires the `parity` check.
+  # The workflow and step names explain that the check is an audit, not certification.
   parity:
     runs-on: ubuntu-24.04
     steps:
@@ -52,5 +56,5 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run parity harness
+      - name: Run declared compatibility audit
         run: python aureon/parity/run_parity.py
