@@ -1,4 +1,4 @@
-# cato-ficc-mcp
+# Cato Sec (`cato_sec`)
 
 > **Claim label: research.**
 > This repository is research code. It is not audited, not production-qualified, and
@@ -8,13 +8,13 @@
 > the first, and this label changes only when evidence changes it.
 
 
-A Model Context Protocol (MCP) server exposing governed FICC market data
+Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.3.1.
+v0.3.2.
 
-## Why "Cato"
+## Why "Cato Sec"
 
 Named after Marcus Porcius Cato (Cato the Censor), the Roman senator who
 closed every speech, regardless of topic, with the same governance demand.
@@ -30,19 +30,18 @@ and pre-trade control.
 
 ### Governance Gates
 
-- `cato_gate` — Pre-settlement DSOR doctrine context: SOFR, 10y, 2y10y spread,
+- `cato_sec` — Pre-settlement DSOR doctrine context: SOFR, 10y, 2y10y spread,
   OFR stress, fed liquidity posture.
 - `get_atomic_settlement_gate` — Verana L0 multi-chain doctrine gate. Returns
   `PROCEED` / `HOLD` / `ESCALATE` plus `recommended_chain`.
 
-> **Naming — two gates called Cato.** The gates in this repository
-> (`cato_gate` for pre-settlement doctrine context, `get_atomic_settlement_gate`
-> for `PROCEED` / `HOLD` / `ESCALATE` plus a recommended chain) govern the
-> securities and tokenized settlement rail, and are public MCP tools. `CATO-F`,
+> **Canonical identity.** The securities and tokenized-settlement gate in this
+> repository is `cato_sec`; `get_atomic_settlement_gate` composes it with rail
+> state. `CATO-F`,
 > in [br-collab/Project-Atreides](https://github.com/br-collab/Project-Atreides)
 > (`atreides/rails/cato_f.py`), is a separate in-process gate for the **cash**
 > settlement rail; it emits `PROCEED` / `HOLD` / `ESCALATE` with a rail and a
-> finality class. The two are designed as counterparts and share the same OFR
+> finality class. The components are designed as counterparts and share the same OFR
 > STLFSI4 stress thresholds, but they are different components answering
 > different questions on different surfaces. Not interchangeable.
 
@@ -117,7 +116,7 @@ Add to your `~/.claude.json` under `mcpServers`:
 
 ```json
 {
-  "cato": {
+  "cato_sec": {
     "type": "stdio",
     "command": "node",
     "args": ["/absolute/path/to/Cato-FICC-MCP/index.js"]
@@ -135,7 +134,7 @@ one at reduced rate limits.
 
 ## Architecture
 
-Cato sits as the FICC market data and settlement-rail interface beneath
+Cato Sec sits as the FICC market data and settlement-rail interface beneath
 Aureon's broader pre-trade governance platform.
 
 ```
@@ -145,7 +144,7 @@ Aureon's broader pre-trade governance platform.
               Verana L0 (control & boundary layer)
                        |
                        v
-              Cato (FICC MCP server)
+           Cato Sec (FICC MCP server)
                        |
        +---------------+---------------+
        |               |               |
@@ -156,7 +155,7 @@ Aureon's broader pre-trade governance platform.
                    stress idx)      settlement)
 ```
 
-Cato is the Verana L0 data layer of the Aureon Decision System of Record
+Cato Sec is the Verana L0 data layer of the Aureon Decision System of Record
 (DSOR) — a pre-trade governance platform where agents advise and operators
 decide. The server exposes read-only market data and deterministic governance
 gate evaluations; no tool can initiate, route, or release a settlement. The
@@ -232,7 +231,7 @@ cost the router prefers certainty of finality over raw speed. An XRPL
 transaction in a validated ledger is final — consensus validation is
 deterministic, with no probabilistic confirmation window — at a ~4s ledger
 close and a fee of typically 10-15 drops (~$0.00003). Solana is 10× faster
-(400ms) but carries the 2022-2023 outage history already flagged in Cato's
+(400ms) but carries the 2022-2023 outage history already flagged in Cato Sec's
 `solana_note`. For institutional DvP settlement, 3.6 seconds is noise;
 finality certainty is not. XRPL's own incident record (one 64-minute
 consensus stall, Feb 4-5, 2025, no loss of user assets) is disclosed in
@@ -276,19 +275,19 @@ What this server does **not** model: Value-at-Risk-based clearing fund margin,
 the capped contingency liquidity facility, or netting resolved at instrument
 level.
 
-> **Cato is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**
+> **Cato Sec is chain-agnostic by design. The governance gate — not the rail — is the product. The doctrine doesn't change when a new rail is added. The rail does.**
 
 ### Fed L1 / PORTS notes
 
 The `fed_l1` slot is a documented, non-functional placeholder. Tokenized Federal
 Reserve reserves do not exist and remain hypothetical. The GENIUS Act (enacted
 July 2025) governs privately issued payment stablecoins, not central-bank money.
-**Cato has the slot ready now.** The doctrine doesn't change when a new rail is
+**Cato Sec has the slot ready now.** The doctrine doesn't change when a new rail is
 added; the rail does.
 
 ## Academic Foundation
 
-Cato's rail comparison framework is grounded in published economic research
+Cato Sec's rail comparison framework is grounded in published economic research
 on tokenized Treasury settlement:
 
 - **Duffie, D. & Wilson, D. R. (2025).** *The case for a new floating rate Treasury note.* Brookings Institution (Dec 2025). Proposes Perpetual Overnight Rate Treasury Securities (PORTS).
@@ -298,7 +297,7 @@ on tokenized Treasury settlement:
 
 See `SECURITY_NOTES.md` for the current supply-chain audit posture, including
 the hono CVE reachability analysis (GHSA-458j-xx4x-4375, inherited
-transitively via `@modelcontextprotocol/sdk`, unreachable in Cato's stdio
+transitively via `@modelcontextprotocol/sdk`, unreachable in Cato Sec's stdio
 code path).
 
 ## Related Projects

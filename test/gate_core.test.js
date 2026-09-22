@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * test/gate_core.test.js — golden-vector test for the Cato decision core.
+ * test/gate_core.test.js — golden-vector test for the Cato Sec decision core.
  * ==========================================================================
- * PURPOSE: gate_core.js is the single source of truth for Cato thresholds
+ * PURPOSE: gate_core.js is the single source of truth for Cato Sec thresholds
  * (see its header). Until this file existed, nothing in this repository's
  * own CI verified that source against a doctrine-expected value — CI ran
  * `node --check index.js` (syntax only) and an MCP tools/list roundtrip
@@ -12,7 +12,7 @@
  * This is a subset of the doctrine boundary cases also carried, in full,
  * as parity/cato_golden_vectors.json in the Aureon repo (br-collab/aureon),
  * which cross-checks this same file against the Python twin
- * (aureon/mcp/cato_client.py). This file exists so cato-mcp verifies its
+ * (aureon/mcp/cato_client.py). This file exists so cato-sec-mcp verifies its
  * own decision core in isolation, without depending on that sibling repo
  * being checked out.
  *

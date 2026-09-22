@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cato MCP Server — v0.3.0
+ * Cato Sec MCP Server — v0.3.2
  * Read-only advisory data layer for tokenized settlement governance.
  * Multi-chain market data server with live CoinGecko price feeds.
  * v0.3.0 adds the XRPL settlement rail: live fee state via the XRPL
@@ -20,7 +20,7 @@
  * September 2019 repo spike gap identified by cato_backtest.py.
  *
  * Named after Marcus Porcius Cato — Roman senator and institutional
- * conscience of the Republic. Cato is the Verana L0 data layer for
+ * conscience of the Republic. Cato Sec is the Verana L0 data layer for
  * Project Aureon's tokenized settlement doctrine.
  *
  * Data sources (all free, no auth required):
@@ -136,7 +136,7 @@ const FRED_KEY = process.env.FRED_API_KEY || ""; // Free key from fred.stlouisfe
 async function get(url, params = {}) {
   try {
     const res = await axios.get(url, { params, timeout: 10000,
-      headers: { "User-Agent": "Cato-MCP-Server/0.3.0 (open-source; Project Aureon; contact: github)" }
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon; contact: github)" }
     });
     return res.data;
   } catch (e) {
@@ -214,7 +214,7 @@ async function getLivePrices() {
       timestamp: new Date().toISOString(),
       fallback_used: true,
       error: e.message,
-      note: "CoinGecko unreachable and no sticky cache (cold boot). Using Cato static fallback prices.",
+      note: "CoinGecko unreachable and no sticky cache (cold boot). Using Cato Sec static fallback prices.",
     };
   }
 }
@@ -276,7 +276,7 @@ async function solanaStats(solPrice) {
       SOLANA_RPC,
       { jsonrpc: "2.0", id: 1, method: "getRecentPrioritizationFees", params: [] },
       { timeout: 5000, headers: { "Content-Type": "application/json",
-          "User-Agent": "Cato-MCP-Server/0.2.1 (open-source; Project Aureon)" } }
+          "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon)" } }
     );
     const fees = res.data?.result || [];
     const priorityMedian = fees.length > 0
@@ -323,7 +323,7 @@ async function xrplStats(xrpPrice) {
         endpoint,
         { method: "fee", params: [{}] },
         { timeout: 5000, headers: { "Content-Type": "application/json",
-            "User-Agent": "Cato-MCP-Server/0.3.0 (open-source; Project Aureon)" } }
+            "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon)" } }
       );
       const drops = res.data?.result?.drops;
       if (!drops) continue;   // malformed response — try next endpoint
@@ -593,7 +593,7 @@ const TOOLS = [
     }, required: ["cik"] }
   },
 
-  // ── TOKENIZED SETTLEMENT TOOLS (Cato doctrine layer) ──────────────────────
+  // ── TOKENIZED SETTLEMENT TOOLS (Cato Sec doctrine layer) ──────────────────
   {
     name: "get_onchain_prices",
     description: "Live ETH, SOL, and XRP USD prices from the free CoinGecko public API (no auth). Returns {eth, sol, xrp, source, timestamp, fallback_used}. Used internally by compare_settlement_rails and get_atomic_settlement_gate for accurate rail cost math; exposed as a standalone tool so LLM callers can query current spot prices without triggering the full rail comparison. Institutional deployments should swap this for a licensed feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
@@ -619,13 +619,13 @@ const TOOLS = [
   },
   {
     name: "get_atomic_settlement_gate",
-    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_gate for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, Solana, and XRPL. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei OR |SOFR 1-day delta| > 10 bps. PROCEED otherwise. Chain picker (v0.3.0 doctrine): XRPL first when its fee is ultra-low (deterministic ~4s finality preferred over probabilistic 400ms speed), then Solana, Base, Ethereum. Includes an xrpl_note (deterministic finality, Feb 2025 64-minute stall on record), a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (non-functional placeholder; tokenized Fed reserves do not exist; GENIUS Act enacted July 2025 governs privately issued stablecoins). Does not route or settle any trade.",
+    description: "Verana L0 multi-chain doctrine gate for tokenized settlement. Calls cato_sec for rates and stress, get_tokenized_settlement_context for on-chain posture, and get_multichain_gas for rail conditions across Ethereum, Base, Arbitrum, Solana, and XRPL. Returns PROCEED / HOLD / ESCALATE plus a recommended_chain. ESCALATE if OFR stress > 1.0. HOLD if OFR stress > 0.5 OR Ethereum gas > 50 gwei OR |SOFR 1-day delta| > 10 bps. PROCEED otherwise. Chain picker (v0.3.0 doctrine): XRPL first when its fee is ultra-low (deterministic ~4s finality preferred over probabilistic 400ms speed), then Solana, Base, Ethereum. Includes an xrpl_note (deterministic finality, Feb 2025 64-minute stall on record), a solana_note (400ms finality, 2022-2023 outage history, fallback doctrine) and a fed_l1_note (non-functional placeholder; tokenized Fed reserves do not exist; GENIUS Act enacted July 2025 governs privately issued stablecoins). Does not route or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
 
   // ── GOVERNANCE ────────────────────────────────────────────────────────────
   {
-    name: "cato_gate",
+    name: "cato_sec",
     description: "Read-only advisory pre-trade check — consolidated eFICC governance context for DSOR pre-trade record: SOFR, 10y yield, 2y10y spread, OFR stress index, fed liquidity posture. Single tool that Verana L0 calls before any tokenized settlement decision. Does not execute, route, or settle any trade. (Renamed from get_ficc_context.)",
     inputSchema: { type: "object", properties: {} }
   }
@@ -919,8 +919,8 @@ async function handleTool(name, args) {
       return { source: "SEC EDGAR", company: data.name, cik, filings: filtered };
     }
 
-    // ── CATO GATE (was get_ficc_context) ────────────────────────────────────
-    case "cato_gate": {
+    // ── CATO SEC GATE (originally get_ficc_context) ──────────────────────────
+    case "cato_sec": {
       // v0.2.1: fetch live prices, FRED/NY Fed rates+stress, and multichain
       // rail state in parallel so the DSOR context includes a chain
       // recommendation alongside rates + stress.
@@ -943,7 +943,7 @@ async function handleTool(name, args) {
 
       // Chain recommendation — v0.3.0 delegates to gate_core's
       // pickRecommendedChain (single source of truth, includes the xrpl
-      // rail) instead of the v0.2.x inline duplicate, so cato_gate can
+      // rail) instead of the v0.2.x inline duplicate, so cato_sec can
       // never drift from get_atomic_settlement_gate. Gate conditions
       // (stress ≤ 0.5 and gas ≤ 50) are unchanged from v0.2.x. An unusable
       // reading is treated the same as failing the stress condition: no
@@ -957,7 +957,7 @@ async function handleTool(name, args) {
       return {
         source: "FRED + NY Fed + Blockscout + Solana RPC",
         dsor_context_date: new Date().toISOString(),
-        description: "Cato pre-settlement doctrine check — DSOR governance context snapshot (v0.2.0 multi-chain)",
+        description: "Cato Sec pre-settlement doctrine check — DSOR governance context snapshot (v0.2.0 multi-chain)",
         rates: {
           sofr: sofr.observations?.[0],
           treasury_10y: t10y.observations?.[0],
@@ -1037,7 +1037,7 @@ async function handleTool(name, args) {
       const ofrRaw = stress.observations?.[0]?.value;
       const ofr_stress = ofrRaw !== undefined && ofrRaw !== null ? parseFloat(ofrRaw) : null;
 
-      // Settlement posture per Cato doctrine thresholds:
+      // Settlement posture per Cato Sec doctrine thresholds:
       //   elevated  — stress > 1.0 OR gas > 50 OR the stress reading is unusable
       //   monitor   — stress 0.5..1.0 OR gas 30..50
       //   favorable — stress < 0.5 AND gas < 30
@@ -1222,14 +1222,14 @@ async function handleTool(name, args) {
         rails: railTable,
         ranked,
         recommended_rail,
-        doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional. v0.3.0 doctrine: at equal ultra-low cost (< $0.01) XRPL is preferred over Solana because deterministic single-ledger finality (~4s, no probabilistic confirmation window) dominates raw speed for institutional DvP settlement.",
+        doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato Sec routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional. v0.3.0 doctrine: at equal ultra-low cost (< $0.01) XRPL is preferred over Solana because deterministic single-ledger finality (~4s, no probabilistic confirmation window) dominates raw speed for institutional DvP settlement.",
         fed_l1_note: "Federal Reserve tokenized deposits (reserves) do not exist and remain hypothetical. Duffie, D. & Wilson, D. R. (2025), 'The case for a new floating rate Treasury note,' Brookings Institution (Dec 2025), proposes PORTS as a potential sovereign instrument. The GENIUS Act (enacted July 2025) governs privately issued payment stablecoins, not central-bank money. The fed_l1 slot is a non-functional placeholder; recommended_rail is advisory only — Cato does not route or settle any trade.",
       };
     }
 
     // ── ATOMIC SETTLEMENT GATE (Cato v0.2.2 — SOFR delta restored) ─────────
     case "get_atomic_settlement_gate": {
-      // v0.2.2: fetch live prices, cato_gate + settlement context,
+      // v0.2.2: fetch live prices, cato_sec + settlement context,
       // multichain rails, AND a 2-observation SOFR history so we can
       // compute the 1-day delta. The SOFR delta check is the v0.1.0-era
       // funding-market shock detector that was dropped in v0.2.0 and
@@ -1237,7 +1237,7 @@ async function handleTool(name, args) {
       // repo spike gap.
       const prices = await getLivePrices();
       const [gateContext, settlementContext, rails, sofrHistory] = await Promise.all([
-        handleTool("cato_gate", {}),
+        handleTool("cato_sec", {}),
         handleTool("get_tokenized_settlement_context", {}),
         multichainGas(prices),
         fredSeries("SOFR", 2),
@@ -1289,7 +1289,7 @@ async function handleTool(name, args) {
         // v0.3.0 doctrine string bump is part of the xrpl doctrine event
         // — the Python twin takes the same string in the same change set
         // (PARITY_XRPL.md).
-        doctrine: "Verana L0 — Cato settlement gate v0.3.0",
+        doctrine: "Verana L0 — Cato Sec settlement gate v0.3.0",
         inputs: {
           ofr_stress,
           gas_gwei,
@@ -1326,7 +1326,7 @@ async function handleTool(name, args) {
 
 // ── SERVER SETUP ─────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "cato", version: "0.3.0" },
+  { name: "cato_sec", version: "0.3.2" },
   { capabilities: { tools: {} } }
 );
 
@@ -1353,7 +1353,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato MCP Server v0.3.0 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
+  process.stderr.write("Cato Sec MCP Server v0.3.2 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
 }
 
 main().catch(err => {

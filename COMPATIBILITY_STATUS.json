@@ -8,7 +8,7 @@
     {
       "id": "xrpl-routing",
       "kind": "decision-output",
-      "cato": "prefers xrpl below the shared ultra-low-fee threshold",
+      "cato_sec": "prefers xrpl below the shared ultra-low-fee threshold",
       "counterpart": "has no xrpl branch and selects solana for parity vector V17",
       "evidence": "br-collab/aureon parity/cato_golden_vectors.json V17",
       "resolved": false
@@ -16,9 +16,9 @@
     {
       "id": "production-stress-series",
       "kind": "production-input",
-      "cato": "FRED STLFSI4",
+      "cato_sec": "FRED STLFSI4",
       "counterpart": "OFR Financial Stress Index or a derived proxy",
-      "evidence": "Cato index.js and br-collab/aureon server.py input wiring",
+      "evidence": "Cato Sec index.js and br-collab/aureon server.py input wiring",
       "resolved": false
     }
   ],

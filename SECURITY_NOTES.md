@@ -1,4 +1,4 @@
-# Cato — Security Notes
+# Cato Sec — Security Notes
 
 > **Audit artifact.** Created 2026-04-19 from Sam's read-only review of
 > Cato during the Aureon doctrine-note phase. Scope: npm audit
@@ -79,7 +79,7 @@ attempt a hono bump in-place.
 ### One-line fix command (if/when we choose to apply it)
 
 ```bash
-cd <path-to-cato-ficc-mcp> && npm audit fix
+cd <path-to-cato-sec-mcp> && npm audit fix
 ```
 
 This bumps hono to ≥4.12.14. No code changes to `index.js` required.
@@ -234,7 +234,7 @@ PARITY_XRPL.md.
 
 ### Read-only scope
 
-Cato is read-only and advisory. No tool in this server initiates, routes, or
+Cato Sec is read-only and advisory. No tool in this server initiates, routes, or
 settles a trade. The doctrine gate outputs (`PROCEED` / `HOLD` / `ESCALATE`)
 and `recommended_chain` / `recommended_rail` fields are advisory inputs to a
 human authority gate, not execution paths.
@@ -243,6 +243,6 @@ human authority gate, not execution paths.
 
 | Component | Version |
 |---|---|
-| Package (`cato-ficc-mcp`) | 0.3.0 |
+| Package (`cato-sec-mcp`) | 0.3.2 |
 | Doctrine (xrpl deterministic-finality preference) | 0.3.0 |
 | Doctrine (SOFR delta trigger restored) | 0.2.2 |

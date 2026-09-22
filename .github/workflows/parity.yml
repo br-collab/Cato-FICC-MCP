@@ -1,4 +1,4 @@
-name: Cato compatibility audit
+name: Cato Sec compatibility audit
 
 # Runs the compatibility harness that lives in br-collab/aureon
 # (parity/run_parity.py): this repository's gate_core.js — the exact decision
@@ -9,7 +9,7 @@ name: Cato compatibility audit
 #
 # aureon is checked out at `main` by default, not pinned: the question this
 # job answers is whether the two repositories as they stand agree. The daily
-# run catches a twin change landing on the aureon side with no Cato push.
+# run catches a twin change landing on the aureon side with no Cato Sec push.
 # This is not a compatibility certification: declared known-failing vectors and
 # production-input differences keep COMPATIBILITY_STATUS.json INCOMPATIBLE.
 # Exit code 0 means no undeclared drift; 1 means unexpected drift; 2 means not
