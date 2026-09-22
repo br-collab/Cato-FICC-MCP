@@ -1,5 +1,13 @@
 # cato-ficc-mcp
 
+> **Claim label: research.**
+> This repository is research code. It is not audited, not production-qualified, and
+> has never been used to move real money. Every surface that could reach a payment
+> rail refuses to by construction. The four labels this programme uses are *research*,
+> *experimental*, *validated* and *production-qualified*; all five repositories are at
+> the first, and this label changes only when evidence changes it.
+
+
 A Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
