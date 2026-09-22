@@ -28,6 +28,31 @@ and pre-trade control.
 
 23 tools, all read-only — no tool can initiate, route, or release a trade.
 
+### Public API
+
+The supported external interface is the `cato_sec` stdio executable and the
+23 MCP tools listed below. Install the package and start it with `cato_sec`,
+`npm start`, or `node index.js`; MCP clients should discover and call tools
+through the protocol rather than import implementation functions from
+`index.js`. Requiring `index.js` starts the server immediately, and it exports
+no JavaScript library API.
+
+`gate_core.js` is the one importable CommonJS module. It is a narrow,
+I/O-free decision surface used by this repository's tests and Aureon's parity
+harness. It exports:
+
+- `computeGateDecision` and `pickRecommendedChain`, the deterministic gate and
+  chain-selection functions;
+- `isUsableStressReading` and `stressReadingFromObservation`, the stress-input
+  validation helpers; and
+- the six `CATO_*` doctrine constants used by those decisions.
+
+Those exports are a compatibility and verification surface, not a second MCP
+entry point. New integrations should use the MCP tools unless they specifically
+need to test the pure doctrine functions with supplied inputs. All other
+functions, constants, caches, handlers, and data-source clients in `index.js`
+are implementation details and may change without forming a package-level API.
+
 ### Governance Gates
 
 - `cato_sec` — Pre-settlement DSOR doctrine context: SOFR, 10y, 2y10y spread,
