@@ -30,6 +30,9 @@ jobs:
       - name: Gate core golden vectors
         run: npm test
 
+      - name: Cato Sec gate branch coverage
+        run: npm run test:branch-coverage
+
       - name: Cold boot + MCP tools/list roundtrip
         run: |
           printf '%s\n' \
