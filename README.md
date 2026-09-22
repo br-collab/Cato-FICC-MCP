@@ -34,10 +34,13 @@ The supported external interface is the `cato_sec` stdio executable and the
 23 MCP tools listed below. Install the package and start it with `cato_sec`,
 `npm start`, or `node index.js`; MCP clients should discover and call tools
 through the protocol rather than import implementation functions from
-`index.js`. Requiring `index.js` starts the server immediately, and it exports
-no JavaScript library API.
+`index.js`. Executing `index.js` starts the server; requiring it is side-effect
+free and exports no JavaScript library API. The package export map deliberately
+has no root library export, so package consumers cannot accidentally treat the
+executable as a second API.
 
-`gate_core.js` is the one importable CommonJS module. It is a narrow,
+The `cato-sec-mcp/gate-core` compatibility subpath (implemented by
+`gate_core.js`) is the one importable CommonJS module. It is a narrow,
 I/O-free decision surface used by this repository's tests and Aureon's parity
 harness. It exports:
 

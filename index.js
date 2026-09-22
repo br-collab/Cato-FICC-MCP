@@ -1356,7 +1356,9 @@ async function main() {
   process.stderr.write("Cato Sec MCP Server v0.3.2 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
 }
 
-main().catch(err => {
-  process.stderr.write(`Fatal: ${err.message}\n`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    process.stderr.write(`Fatal: ${err.message}\n`);
+    process.exit(1);
+  });
+}
