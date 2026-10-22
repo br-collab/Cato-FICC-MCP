@@ -5,7 +5,7 @@
   "main": "index.js",
   "exports": { "./gate-core": "./gate_core.js" },
   "bin": { "cato_sec": "./index.js" },
-  "scripts": { "start": "node index.js", "test": "node test/gate_core.test.js && node test/compatibility_claim.test.js && node test/naming.test.js && node test/executable_boundary.test.js", "test:branch-coverage": "c8 --include=gate_core.js --branches 69 --statements 99 --functions 100 --lines 99 node test/gate_core.test.js" },
+  "scripts": { "start": "node index.js", "test": "node test/gate_core.test.js && node test/compatibility_claim.test.js && node test/naming.test.js && node test/executable_boundary.test.js && node test/repo_depth.test.js", "test:branch-coverage": "c8 --include=gate_core.js --branches 69 --statements 99 --functions 100 --lines 99 node test/gate_core.test.js" },
   "keywords": ["mcp", "ficc", "sofr", "treasury", "repo", "tokenization", "defi", "tradfi", "aureon", "xrpl", "xrp", "settlement"],
   "author": "Guillermo (Bill) Ravelo",
   "license": "MIT",

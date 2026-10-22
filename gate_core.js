@@ -68,7 +68,7 @@ function stressReadingFromObservation(observation) {
 
 /**
  * Pure Cato Sec gate decision. Inputs:
- *   ofr_stress     — OFR STLFSI4 value; must be a finite number to be
+ *   ofr_stress     — St. Louis Fed STLFSI4 value; must be a finite number to be
  *                    usable (see isUsableStressReading). An unusable
  *                    reading HOLDs — it never falls through to PROCEED.
  *   gas_gwei       — ETH L1 gas in gwei, or null/undefined if unavailable
@@ -86,7 +86,7 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
     return {
       gate_decision: "HOLD",
       reasons: [
-        `OFR stress reading is not a usable number (got ${JSON.stringify(ofr_stress)}) — ` +
+        `St. Louis Fed stress reading is not a usable number (got ${JSON.stringify(ofr_stress)}) — ` +
           "feed missing or malformed; holding rather than assuming clear",
       ],
       recommended_rail: "traditional",
@@ -97,12 +97,12 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
   if (ofr_stress > CATO_OFR_ESCALATE_THRESHOLD) {
     gate_decision = "ESCALATE";
     recommended_rail = "human_authority";
-    reasons.push(`OFR stress index at ${ofr_stress.toFixed(2)} — systemic stress threshold (>${CATO_OFR_ESCALATE_THRESHOLD}) breached`);
+    reasons.push(`St. Louis Fed stress index at ${ofr_stress.toFixed(2)} — systemic stress threshold (>${CATO_OFR_ESCALATE_THRESHOLD}) breached`);
   } else {
     // HOLD if non-systemic friction
     if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
       gate_decision = "HOLD";
-      reasons.push(`OFR stress index at ${ofr_stress.toFixed(2)} — above-average stress (>${CATO_OFR_HOLD_THRESHOLD})`);
+      reasons.push(`St. Louis Fed stress index at ${ofr_stress.toFixed(2)} — above-average stress (>${CATO_OFR_HOLD_THRESHOLD})`);
     }
     if (gas_gwei !== null && gas_gwei !== undefined && gas_gwei > CATO_GAS_GWEI_HOLD_THRESHOLD) {
       gate_decision = "HOLD";

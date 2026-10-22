@@ -53,8 +53,8 @@ jobs:
                 }
               } catch(e){}
             }
-            if (tools.length !== 23) {
-              console.error("FAIL: expected 23 tools, got " + tools.length);
+            if (tools.length !== 24) {
+              console.error("FAIL: expected 24 tools, got " + tools.length);
               process.exit(1);
             }
             const names = tools.map((tool) => tool.name);
