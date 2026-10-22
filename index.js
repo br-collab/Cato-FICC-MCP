@@ -47,6 +47,7 @@ const FRED_BASE = "https://api.stlouisfed.org/fred";
 const NYFED_BASE = "https://markets.newyorkfed.org/api";
 const TREASURY_BASE = "https://api.fiscaldata.treasury.gov/services/api/v1";
 const EDGAR_BASE = "https://data.sec.gov";
+const OFR_STFM_BASE = "https://data.financialresearch.gov/v1";
 
 // ── Multi-chain settlement rails (Blockscout + Solana RPC) ───────────────────
 // Each entry is a free public endpoint. Solana is different protocol so it
@@ -543,7 +544,7 @@ const TOOLS = [
   // ── OFR / MONEY MARKETS ───────────────────────────────────────────────────
   {
     name: "get_ofr_stress_index",
-    description: "OFR Financial Stress Index — composite measure of systemic stress across money markets, equity markets, funding markets. Verana L0 systemic stress overlay for doctrine gate decisions.",
+    description: "St. Louis Fed Financial Stress Index (FRED STLFSI4). Verana L0 systemic stress overlay for doctrine gate decisions.",
     inputSchema: { type: "object", properties: {
       days: { type: "number", default: 30 }
     }}
@@ -560,11 +561,16 @@ const TOOLS = [
   // ── REPO MARKET TOOLS ─────────────────────────────────────────────────────
   {
     name: "get_repo_market_context",
-    description: "Repo market context: overnight repo rate (SOFR), term SOFR rates (1m, 3m, 6m), reverse repo facility usage. Critical for repo clearing mandate compliance analysis.",
+    description: "Repo context: OFR FICC DVP, FICC GCF and tri-party rates/volumes beside NY Fed SOFR/BGCR/TGCR percentiles and volumes.",
     inputSchema: { type: "object", properties: {
       include_term_sofr: { type: "boolean", default: true },
       days: { type: "number", default: 10 }
     }}
+  },
+  {
+    name: "get_cleared_repo_segments",
+    description: "OFR STFM FICC DVP, FICC GCF and tri-party average rates and transaction volumes, overnight/open and total.",
+    inputSchema: { type: "object", properties: {} }
   },
   {
     name: "get_term_sofr",
@@ -626,7 +632,7 @@ const TOOLS = [
   // ── GOVERNANCE ────────────────────────────────────────────────────────────
   {
     name: "cato_sec",
-    description: "Read-only advisory pre-trade check — consolidated eFICC governance context for DSOR pre-trade record: SOFR, 10y yield, 2y10y spread, OFR stress index, fed liquidity posture. Single tool that Verana L0 calls before any tokenized settlement decision. Does not execute, route, or settle any trade. (Renamed from get_ficc_context.)",
+    description: "Read-only advisory pre-trade check — consolidated eFICC governance context: SOFR, Treasury curve, St. Louis Fed Financial Stress Index, and Fed liquidity posture. Does not execute, route, or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   }
 ];
@@ -820,7 +826,9 @@ async function handleTool(name, args) {
     case "get_ofr_stress_index": {
       const data = await fredSeries("STLFSI4", args.days || 30);
       return {
-        source: "OFR / FRED — St. Louis Fed Financial Stress Index",
+        source: "Federal Reserve Bank of St. Louis via FRED",
+        series_id: "STLFSI4",
+        index_name: "St. Louis Fed Financial Stress Index",
         description: "Values above 0 indicate above-average financial stress. Verana L0 systemic stress signal.",
         stress_index: data.observations
       };
@@ -844,26 +852,36 @@ async function handleTool(name, args) {
 
     case "get_repo_market_context": {
       const days = args.days || 10;
-      const includeTerm = args.include_term_sofr !== false;
-      const [sofr, rrp, bgcr] = await Promise.all([
-        fredSeries("SOFR", days),
-        fredSeries("RRPONTSYD", days),
-        fredSeries("BGCR", days)
+      const [segments, sofr, bgcr, tgcr] = await Promise.all([
+        handleTool("get_cleared_repo_segments", {}),
+        get(`${NYFED_BASE}/rates/sofr/last/${days}.json`),
+        get(`${NYFED_BASE}/rates/bgcr/last/${days}.json`),
+        get(`${NYFED_BASE}/rates/tgcr/last/${days}.json`)
       ]);
-      const result = {
-        source: "NY Fed + FRED",
-        overnight_rates: { sofr: sofr.observations, bgcr: bgcr.observations },
-        fed_reverse_repo_volume: rrp.observations
-      };
-      if (includeTerm) {
-        const [t1m, t3m, t6m] = await Promise.all([
-          fredSeries("SOFR1", days),
-          fredSeries("SOFR3", days),
-          fredSeries("SOFR6", days)
-        ]);
-        result.term_sofr = { "1m": t1m.observations, "3m": t3m.observations, "6m": t6m.observations };
-      }
-      return result;
+      return { source: "OFR STFM + Federal Reserve Bank of New York", as_of: new Date().toISOString(),
+        cleared_segments: segments, reference_rates: {
+          SOFR: { series_id: "SOFR", observations: sofr.refRates || sofr },
+          BGCR: { series_id: "BGCR", observations: bgcr.refRates || bgcr },
+          TGCR: { series_id: "TGCR", observations: tgcr.refRates || tgcr }
+        }, note: "NY Fed observations include published percentiles and transaction volume; upstream failures remain labelled errors." };
+    }
+
+    case "get_cleared_repo_segments": {
+      const series = [
+        "REPO-DVP_AR_OO-P", "REPO-DVP_TV_OO-P", "REPO-DVP_AR_TOT-P", "REPO-DVP_TV_TOT-P",
+        "REPO-GCF_AR_OO-P", "REPO-GCF_TV_OO-P", "REPO-GCF_AR_TOT-P", "REPO-GCF_TV_TOT-P",
+        "REPO-TRI_AR_OO-P", "REPO-TRI_TV_OO-P", "REPO-TRI_AR_TOT-P", "REPO-TRI_TV_TOT-P"
+      ];
+      const observations = {};
+      await Promise.all(series.map(async (seriesId) => {
+        const data = await get(`${OFR_STFM_BASE}/series/timeseries`, { mnemonic: seriesId });
+        const values = Array.isArray(data) ? data : [];
+        const latest = [...values].reverse().find((row) => Array.isArray(row) && row[1] !== null);
+        observations[seriesId] = latest
+          ? { source: "OFR U.S. Repo Markets Data Release", series_id: seriesId, as_of: latest[0], value: latest[1] }
+          : { source: "OFR U.S. Repo Markets Data Release", series_id: seriesId, unavailable: data.error || "no disclosed current observation" };
+      }));
+      return { source: "OFR Short-term Funding Monitor", retrieved_at: new Date().toISOString(), observations };
     }
 
     case "get_term_sofr": {
@@ -1353,7 +1371,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato Sec MCP Server v0.3.2 running — 23 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
+  process.stderr.write("Cato Sec MCP Server v0.3.2 running — 24 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
 }
 
 if (require.main === module) {

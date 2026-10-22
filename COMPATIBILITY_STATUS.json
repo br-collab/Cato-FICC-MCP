@@ -16,7 +16,7 @@
     {
       "id": "production-stress-series",
       "kind": "production-input",
-      "cato_sec": "FRED STLFSI4",
+      "cato_sec": "St. Louis Fed Financial Stress Index (FRED STLFSI4)",
       "counterpart": "OFR Financial Stress Index or a derived proxy",
       "evidence": "Cato Sec index.js and br-collab/aureon server.py input wiring",
       "resolved": false

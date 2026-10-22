@@ -12,7 +12,7 @@ Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market 
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.3.2. The current research implementation exposes the 23 read-only MCP tools and the narrow
+v0.3.2. The current research implementation exposes 24 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
 vectors plus 3 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
@@ -31,12 +31,12 @@ and pre-trade control.
 
 ## What This Server Exposes
 
-23 tools, all read-only — no tool can initiate, route, or release a trade.
+24 tools, all read-only — no tool can initiate, route, or release a trade.
 
 ### Public API
 
 The supported external interface is the `cato_sec` stdio executable and the
-23 MCP tools listed below. Install the package and start it with `cato_sec`,
+24 MCP tools listed below. Install the package and start it with `cato_sec`,
 `npm start`, or `node index.js`; MCP clients should discover and call tools
 through the protocol rather than import implementation functions from
 `index.js`. Executing `index.js` starts the server; requiring it is side-effect
@@ -64,7 +64,7 @@ are implementation details and may change without forming a package-level API.
 ### Governance Gates
 
 - `cato_sec` — Pre-settlement DSOR doctrine context: SOFR, 10y, 2y10y spread,
-  OFR stress, fed liquidity posture.
+  St. Louis Fed stress, fed liquidity posture.
 - `get_atomic_settlement_gate` — Verana L0 multi-chain doctrine gate. Returns
   `PROCEED` / `HOLD` / `ESCALATE` plus `recommended_chain`.
 
@@ -83,7 +83,7 @@ are implementation details and may change without forming a package-level API.
 - `compare_settlement_rails` — All-in cost across FICC traditional,
   Ethereum L1, Base, Arbitrum, Solana, XRPL for a given notional. Returns
   ranked table cheapest-to-most-expensive plus a recommended rail.
-- `get_tokenized_settlement_context` — Combined ETH gas + SOFR + OFR stress
+- `get_tokenized_settlement_context` — Combined ETH gas + SOFR + St. Louis Fed stress
   into a single posture: `favorable` / `monitor` / `elevated`.
 - `get_multichain_gas` — Live gas/fee state across Ethereum, Base, Arbitrum,
   Solana, XRPL, plus the documented `fed_l1` PORTS placeholder.
@@ -102,8 +102,22 @@ are implementation details and may change without forming a package-level API.
 - `get_repo_operations` — Fed open market repo and reverse repo operations.
 - `get_term_sofr` — CME Term SOFR 1m / 3m / 6m / 12m via FRED.
 - `get_money_market_rates` — Commercial paper, banker acceptances, CDs.
-- `get_repo_market_context` — Overnight + term SOFR + reverse repo facility
-  usage in one call.
+- `get_cleared_repo_segments` — OFR STFM FICC DVP, FICC GCF, and tri-party
+  preliminary average rates and transaction volumes with series IDs and dates.
+- `get_repo_market_context` — Those cleared segments beside NY Fed SOFR, BGCR,
+  and TGCR observations, including their published percentiles and volumes.
+  Unavailable sources are labelled unavailable, never presented as current.
+
+### Sections and admission
+
+Cato remains one server organised into Treasury and rates, repo, money markets
+and macro, and digital-assets sections. A section is admitted only when its data
+is free to redistribute, a doctrine gate exists for that rail so tools return
+gate evidence rather than prices alone, and a named domain or agent consumes it.
+Treasury/rates, repo, and money-markets/macro pass through Cato Sec/Cato Cash and
+their Atreides/Aureon consumers; digital assets pass through the atomic-settlement
+gate and Aureon. Equities, listed options, and foreign exchange are not admitted
+because the required operational data is licensed rather than freely redistributable.
 
 ### Treasury Curve
 
@@ -121,7 +135,7 @@ are implementation details and may change without forming a package-level API.
 - `get_cpi` — Headline and core CPI.
 - `get_fed_balance_sheet` — Total assets, Treasury holdings, MBS, reserve
   balances.
-- `get_ofr_stress_index` — OFR Financial Stress Index composite.
+- `get_ofr_stress_index` — St. Louis Fed Financial Stress Index (`STLFSI4`, via FRED).
 
 ### SEC EDGAR
 
@@ -249,7 +263,7 @@ recommendation that a human approves before any settlement instruction is
 generated.
 
 ```
-if      OFR stress > 0.5                         → ficc_traditional   (stress overrides everything)
+if      St. Louis Fed stress > 0.5               → ficc_traditional   (stress overrides everything)
 else if |SOFR 1-day delta| > 10 bps              → ficc_traditional   (funding-market shock override)
 else if notional > $10M  and  eth_gas < 30 gwei  → ethereum_l1        (large notional, gas is noise)
 else if xrpl_fee_usd < $0.01                     → xrpl               (ultra-low cost + deterministic ~4s finality)
