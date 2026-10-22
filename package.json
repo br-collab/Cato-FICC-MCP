@@ -1,7 +1,7 @@
 {
   "name": "cato-sec-mcp",
-  "version": "0.3.2",
-  "description": "Cato Sec read-only MCP server for FICC market data and tokenized-settlement governance. v0.3.2 establishes the canonical cato_sec identity; no tool routes or settles a trade.",
+  "version": "0.4.0",
+  "description": "Cato Sec read-only MCP server for FICC market data and tokenized-settlement governance. v0.4.0 adds public repo depth; no tool routes or settles a trade.",
   "main": "index.js",
   "exports": { "./gate-core": "./gate_core.js" },
   "bin": { "cato_sec": "./index.js" },

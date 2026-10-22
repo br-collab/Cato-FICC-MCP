@@ -12,7 +12,7 @@ Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market 
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.3.2. The current research implementation exposes 24 read-only MCP tools and the narrow
+v0.4.0. The current research implementation exposes 24 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
 vectors plus 3 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
