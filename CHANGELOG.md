@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 23 Oct 2026
+
+### CATO-D2 — license truth and free primary sources
+
+- Removed CME Term SOFR and its repository-context option; the licensed benchmark is
+  declared unavailable rather than redistributed.
+- Moved SOFR-family gate inputs to the New York Fed and nominal Treasury curve inputs
+  to Treasury's daily XML publication, while retaining live, uncached FRED access only
+  for residual series with the required notice.
+- Added admitted read-only lookups for SEC fails-to-deliver balances, OFR FSI, GLEIF
+  LEIs, OpenFIGI mappings, OFAC SDN exact-name context, and Treasury average rates.
+- Added source/license admissions, exclusions, attribution notices, and fail-closed
+  behavior without changing the deterministic gate core.
+
 ## 0.4.0 — 22 Oct 2026
 
 ### CATO-D1 — repo depth and public sections

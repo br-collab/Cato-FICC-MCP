@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cato Sec MCP Server — v0.3.2
+ * Cato Sec MCP Server — v0.5.0
  * Read-only advisory data layer for tokenized settlement governance.
  * Multi-chain market data server with live CoinGecko price feeds.
  * v0.3.0 adds the XRPL settlement rail: live fee state via the XRPL
@@ -25,8 +25,8 @@
  *
  * Data sources (all free, no auth required):
  *   - NY Fed:        SOFR, BGCR, TGCR, EFFR, repo reference rates
- *   - FRED:          Treasury yields, fed funds, repo rates, macro regime
- *   - TreasuryDirect: Auction results, yield curves
+ *   - FRED:          Data without an admitted primary replacement; live, uncached
+ *   - U.S. Treasury: Auctions, yield curves, fiscal data, OFAC SDN
  *   - OFR:           Financial stress index, systemic risk indicators
  *   - SEC EDGAR:     13F filings, institutional positioning
  *   - Blockscout:    On-chain network state (ETH, Base, Arbitrum)
@@ -42,12 +42,25 @@ const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
 const axios = require("axios");
+const AdmZip = require("adm-zip");
 
 const FRED_BASE = "https://api.stlouisfed.org/fred";
 const NYFED_BASE = "https://markets.newyorkfed.org/api";
-const TREASURY_BASE = "https://api.fiscaldata.treasury.gov/services/api/v1";
+const TREASURY_BASE = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2";
 const EDGAR_BASE = "https://data.sec.gov";
 const OFR_STFM_BASE = "https://data.financialresearch.gov/v1";
+const OFR_FSI_CSV = "https://www.financialresearch.gov/financial-stress-index/data/fsi.csv";
+const GLEIF_BASE = "https://api.gleif.org/api/v1";
+const OPENFIGI_BASE = "https://api.openfigi.com/v3";
+const OFAC_SDN_CSV = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV";
+const FRED_NOTICE = "This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.";
+const NYFED_NOTICE = "The reference rate data are subject to the Terms of Use posted at newyorkfed.org. The New York Fed is not responsible for publication of the reference rate data by Cato Sec, does not sanction or endorse any particular republication, and has no liability for your use.";
+const COINGECKO_NOTICE = "Price data provided by CoinGecko.";
+
+// CATO-D2 governing rule (ORDER-CATO-D2, scope 2): "Keep FRED only where it
+// is the publisher's own series or no primary feed exists ... live, uncached,
+// with the FRED notice." Source clients below return one response and never
+// write FRED content to a file, database, or process-level cache.
 
 // ── Multi-chain settlement rails (Blockscout + Solana RPC) ───────────────────
 // Each entry is a free public endpoint. Solana is different protocol so it
@@ -134,15 +147,59 @@ const CHAIN_SPEED = {
 
 const FRED_KEY = process.env.FRED_API_KEY || ""; // Free key from fred.stlouisfed.org
 
-async function get(url, params = {}) {
+async function get(url, params = {}, timeout = 10000) {
   try {
-    const res = await axios.get(url, { params, timeout: 10000,
-      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon; contact: github)" }
+    const res = await axios.get(url, { params, timeout,
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
     });
     return res.data;
   } catch (e) {
     return { error: e.message, url };
   }
+}
+
+async function getBinary(url) {
+  try {
+    const res = await axios.get(url, { responseType: "arraybuffer", timeout: 15000,
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
+    });
+    return Buffer.from(res.data);
+  } catch (e) {
+    return { error: e.message, url };
+  }
+}
+
+async function post(url, body) {
+  try {
+    const res = await axios.post(url, body, { timeout: 10000,
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
+    });
+    return res.data;
+  } catch (e) {
+    return { error: e.message, url };
+  }
+}
+
+function parseCsvLine(line) {
+  const fields = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"' && quoted && line[i + 1] === '"') {
+      field += '"';
+      i += 1;
+    } else if (ch === '"') {
+      quoted = !quoted;
+    } else if (ch === "," && !quoted) {
+      fields.push(field.trim());
+      field = "";
+    } else {
+      field += ch;
+    }
+  }
+  fields.push(field.trim());
+  return fields;
 }
 
 // ── CoinGecko live prices (v0.2.3 sticky cache) ──────────────────────────────
@@ -183,7 +240,7 @@ async function getLivePrices() {
         eth: ethUsd,
         sol: solUsd,
         xrp: xrpUsd,
-        source: "coingecko_public",
+        source: `CoinGecko public API. ${COINGECKO_NOTICE}`,
         timestamp: new Date().toISOString(),
         fallback_used: false,
         note: "Live prices via CoinGecko public API. For institutional deployment use a licensed price feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
@@ -228,8 +285,50 @@ async function fredSeries(seriesId, limit = 10) {
   if (data.error) return data;
   return {
     series: seriesId,
+    source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`,
     observations: (data.observations || []).map(o => ({ date: o.date, value: o.value }))
   };
+}
+
+async function nyFedRate(rate, days = 10) {
+  const market = ["sofr", "bgcr", "tgcr"].includes(rate) ? "secured" : "unsecured";
+  const data = await get(`${NYFED_BASE}/rates/${market}/${rate}/last/${days}.json`);
+  if (data.error) return data;
+  return {
+    series: rate.toUpperCase(),
+    source: `Federal Reserve Bank of New York Markets API. ${NYFED_NOTICE}`,
+    observations: (data.refRates || []).map((row) => ({
+      date: row.effectiveDate || row.effective_date || row.date,
+      value: String(row.percentRate ?? row.rate ?? row.value),
+    })),
+  };
+}
+
+async function treasuryYieldCurve(days = 5) {
+  const year = new Date().getUTCFullYear();
+  const data = await get(
+    "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+    { data: "daily_treasury_yield_curve", field_tdr_date_value: year },
+    30000,
+  );
+  if (data.error) return data;
+  const xml = typeof data === "string" ? data : String(data);
+  const entries = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(-days).reverse();
+  const field = (entry, name) => entry.match(new RegExp(`<d:${name}[^>]*>([^<]*)<\\/d:${name}>`))?.[1] ?? null;
+  const tenors = {
+    "1m": "BC_1MONTH", "3m": "BC_3MONTH", "6m": "BC_6MONTH", "1y": "BC_1YEAR",
+    "2y": "BC_2YEAR", "3y": "BC_3YEAR", "5y": "BC_5YEAR", "7y": "BC_7YEAR",
+    "10y": "BC_10YEAR", "20y": "BC_20YEAR", "30y": "BC_30YEAR",
+  };
+  const observations = entries.map((match) => {
+    const entry = match[1];
+    return {
+      date: field(entry, "NEW_DATE")?.slice(0, 10) ?? null,
+      yields: Object.fromEntries(Object.entries(tenors).map(([tenor, name]) => [tenor, field(entry, name)])),
+    };
+  });
+  if (!observations.length) return { error: "Treasury yield feed returned no parseable observations" };
+  return { source: "U.S. Department of the Treasury daily interest rate XML feed", observations };
 }
 
 // ── Blockscout helpers (per-chain) ───────────────────────────────────────────
@@ -277,7 +376,7 @@ async function solanaStats(solPrice) {
       SOLANA_RPC,
       { jsonrpc: "2.0", id: 1, method: "getRecentPrioritizationFees", params: [] },
       { timeout: 5000, headers: { "Content-Type": "application/json",
-          "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon)" } }
+          "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon)" } }
     );
     const fees = res.data?.result || [];
     const priorityMedian = fees.length > 0
@@ -324,7 +423,7 @@ async function xrplStats(xrpPrice) {
         endpoint,
         { method: "fee", params: [{}] },
         { timeout: 5000, headers: { "Content-Type": "application/json",
-            "User-Agent": "Cato-Sec-MCP-Server/0.3.2 (open-source; Project Aureon)" } }
+            "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon)" } }
       );
       const drops = res.data?.result?.drops;
       if (!drops) continue;   // malformed response — try next endpoint
@@ -465,7 +564,7 @@ const TOOLS = [
     name: "get_repo_reference_rates",
     description: "NY Fed repo reference rates: SOFR, BGCR (Broad General Collateral Rate — tri-party repo), TGCR (Tri-party General Collateral Rate). Essential for repo desk pricing and collateral valuation.",
     inputSchema: { type: "object", properties: {
-      rate_type: { type: "string", enum: ["sofr", "bgcr", "tgcr", "all"], description: "Rate type to retrieve", default: "all" }
+      rate_type: { type: "string", enum: ["sofr", "effr", "obfr", "bgcr", "tgcr", "all"], description: "Rate type to retrieve", default: "all" }
     }}
   },
   {
@@ -550,6 +649,11 @@ const TOOLS = [
     }}
   },
   {
+    name: "get_ofr_financial_stress_index",
+    description: "OFR Financial Stress Index and published components from the Office of Financial Research's daily CSV. Informational only; not the STLFSI4 gate input.",
+    inputSchema: { type: "object", properties: { days: { type: "number", default: 30 } } }
+  },
+  {
     name: "get_money_market_rates",
     description: "Money market rates: commercial paper, banker acceptances, certificates of deposit. eFICC short-end context for repo pricing and MMF sweep optimization.",
     inputSchema: { type: "object", properties: {
@@ -563,7 +667,6 @@ const TOOLS = [
     name: "get_repo_market_context",
     description: "Repo context: OFR FICC DVP, FICC GCF and tri-party rates/volumes beside NY Fed SOFR/BGCR/TGCR percentiles and volumes.",
     inputSchema: { type: "object", properties: {
-      include_term_sofr: { type: "boolean", default: true },
       days: { type: "number", default: 10 }
     }}
   },
@@ -573,12 +676,32 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} }
   },
   {
-    name: "get_term_sofr",
-    description: "CME Term SOFR reference rates (1-month, 3-month, 6-month, 12-month) via FRED. Forward-looking rates used in swap pricing and loan documentation post-LIBOR transition.",
+    name: "get_sec_fails_to_deliver",
+    description: "SEC fails-to-deliver balance by CUSIP, twice monthly. Market context only: the published quantity is an aggregate balance, not a count of new fails.",
     inputSchema: { type: "object", properties: {
-      tenor: { type: "string", enum: ["1m","3m","6m","12m","all"], default: "all" },
-      days: { type: "number", default: 10 }
-    }}
+      cusip: { type: "string", minLength: 9, maxLength: 9 },
+      period_url: { type: "string", description: "SEC-published period ZIP URL from the fails-data page" }
+    }, required: ["cusip"] }
+  },
+  {
+    name: "lookup_lei",
+    description: "GLEIF LEI lookup through the documented API Access Service; CC0 identity context for attested crossings and account masters.",
+    inputSchema: { type: "object", properties: { lei: { type: "string", minLength: 20, maxLength: 20 } }, required: ["lei"] }
+  },
+  {
+    name: "map_cusip_to_figi",
+    description: "OpenFIGI CUSIP-to-FIGI mapping. Returns public-domain FIGI identifiers without storing or publishing a CUSIP database.",
+    inputSchema: { type: "object", properties: { cusip: { type: "string", minLength: 9, maxLength: 9 } }, required: ["cusip"] }
+  },
+  {
+    name: "screen_ofac_sdn",
+    description: "Exact-name screening against Treasury OFAC's Sanctions List Service SDN publication. Advisory identity control; unavailable source refuses rather than clears.",
+    inputSchema: { type: "object", properties: { name: { type: "string", minLength: 1 } }, required: ["name"] }
+  },
+  {
+    name: "get_treasury_average_interest_rates",
+    description: "Average interest rates on U.S. Treasury securities from Treasury Fiscal Data.",
+    inputSchema: { type: "object", properties: { limit: { type: "number", default: 10 } } }
   },
 
   // ── SEC EDGAR TOOLS ───────────────────────────────────────────────────────
@@ -612,7 +735,7 @@ const TOOLS = [
   },
   {
     name: "get_tokenized_settlement_context",
-    description: "Read-only advisory signal on current on-chain settlement conditions. Combines Blockscout ETH gas price with FRED SOFR and OFR financial stress index. Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50). Does not initiate, route, or settle any trade.",
+    description: "Read-only advisory signal on current on-chain settlement conditions. Combines Blockscout ETH gas price with New York Fed SOFR and the declared STLFSI4 stress input. Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50). Does not initiate, route, or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -642,25 +765,26 @@ async function handleTool(name, args) {
   switch (name) {
 
     case "get_sofr": {
-      const data = await get(`${NYFED_BASE}/rates/sofr/last/${args.days || 10}.json`);
+      const data = await get(`${NYFED_BASE}/rates/secured/sofr/last/${args.days || 10}.json`);
       if (data.error) return data;
-      return { source: "NY Fed", rate_type: "SOFR", data: data.refRates || data };
+      return { source: `Federal Reserve Bank of New York Markets API. ${NYFED_NOTICE}`, rate_type: "SOFR", data: data.refRates || data };
     }
 
     case "get_repo_reference_rates": {
       const type = args.rate_type || "all";
       const results = {};
-      const types = type === "all" ? ["sofr","bgcr","tgcr"] : [type];
+      const types = type === "all" ? ["sofr","effr","obfr","bgcr","tgcr"] : [type];
       for (const t of types) {
-        const d = await get(`${NYFED_BASE}/rates/${t}/last/5.json`);
+        const market = ["sofr", "bgcr", "tgcr"].includes(t) ? "secured" : "unsecured";
+        const d = await get(`${NYFED_BASE}/rates/${market}/${t}/last/5.json`);
         results[t.toUpperCase()] = d.refRates || d;
       }
-      return { source: "NY Fed", rates: results };
+      return { source: `Federal Reserve Bank of New York Markets API. ${NYFED_NOTICE}`, rates: results };
     }
 
     case "get_effr": {
-      const data = await get(`${NYFED_BASE}/rates/effr/last/${args.days || 10}.json`);
-      return { source: "NY Fed", rate_type: "EFFR", data: data.refRates || data };
+      const data = await get(`${NYFED_BASE}/rates/unsecured/effr/last/${args.days || 10}.json`);
+      return { source: `Federal Reserve Bank of New York Markets API. ${NYFED_NOTICE}`, rate_type: "EFFR", data: data.refRates || data };
     }
 
     case "get_repo_operations": {
@@ -680,25 +804,10 @@ async function handleTool(name, args) {
     case "get_treasury_yield_curve": {
       const tenor = args.tenor || "all";
       const days = args.days || 5;
-      const SERIES = {
-        "1m": "DGS1MO", "3m": "DGS3MO", "6m": "DGS6MO",
-        "1y": "DGS1", "2y": "DGS2", "3y": "DGS3",
-        "5y": "DGS5", "7y": "DGS7", "10y": "DGS10",
-        "20y": "DGS20", "30y": "DGS30"
-      };
-      if (tenor !== "all") {
-        const seriesId = SERIES[tenor];
-        if (!seriesId) return { error: `Unknown tenor: ${tenor}` };
-        return await fredSeries(seriesId, days);
-      }
-      const results = {};
-      for (const [t, s] of Object.entries(SERIES)) {
-        const d = await fredSeries(s, 1);
-        if (d.observations && d.observations[0]) {
-          results[t] = { date: d.observations[0].date, yield: d.observations[0].value };
-        }
-      }
-      return { source: "FRED", description: "US Treasury Constant Maturity Yields", curve: results };
+      const curve = await treasuryYieldCurve(days);
+      if (curve.error) return curve;
+      if (tenor === "all") return curve;
+      return { source: curve.source, tenor, observations: curve.observations.map((row) => ({ date: row.date, value: row.yields[tenor] })) };
     }
 
     case "get_tips_yields": {
@@ -717,7 +826,7 @@ async function handleTool(name, args) {
           results[`${t}_breakeven`] = d.observations?.[0];
         }
       }
-      return { source: "FRED", description: "TIPS Real Yields and Breakeven Inflation", data: results };
+      return { source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`, description: "TIPS Real Yields and Breakeven Inflation", data: results };
     }
 
     case "get_treasury_auctions": {
@@ -737,52 +846,50 @@ async function handleTool(name, args) {
     case "get_yield_curve_spread": {
       const spread = args.spread || "all";
       const days = args.days || 30;
-      const SPREADS = {
-        "2y10y": ["DGS10", "DGS2"],
-        "3m10y": ["DGS10", "DGS3MO"],
-        "5y30y": ["DGS30", "DGS5"]
-      };
+      const SPREADS = { "2y10y": ["10y", "2y"], "3m10y": ["10y", "3m"], "5y30y": ["30y", "5y"] };
       const spreadsToCalc = spread === "all" ? Object.keys(SPREADS) : [spread];
       const results = {};
+      const curve = await treasuryYieldCurve(days);
+      if (curve.error) return curve;
       for (const s of spreadsToCalc) {
-        const [longId, shortId] = SPREADS[s];
-        const [longD, shortD] = await Promise.all([fredSeries(longId, days), fredSeries(shortId, days)]);
-        const obs = (longD.observations || []).map((o, i) => {
-          const shortObs = (shortD.observations || [])[i];
-          if (!shortObs || o.value === "." || shortObs.value === ".") return null;
-          return { date: o.date, spread_bps: ((parseFloat(o.value) - parseFloat(shortObs.value)) * 100).toFixed(1) };
+        const [longId, shortId] = SPREADS[s] || [];
+        if (!longId) return { error: `Unknown spread: ${s}` };
+        const obs = curve.observations.map((o) => {
+          const longValue = parseFloat(o.yields[longId]);
+          const shortValue = parseFloat(o.yields[shortId]);
+          return Number.isFinite(longValue) && Number.isFinite(shortValue)
+            ? { date: o.date, spread_bps: ((longValue - shortValue) * 100).toFixed(1) } : null;
         }).filter(Boolean);
         results[s] = { description: `${s} spread (basis points)`, data: obs.slice(0, days) };
       }
-      return { source: "FRED", yield_curve_spreads: results };
+      return { source: curve.source, yield_curve_spreads: results };
     }
 
     case "get_macro_regime_snapshot": {
-      const [effr, sofr, t10y, t2y, t3m, cpi, unrate] = await Promise.all([
-        fredSeries("FEDFUNDS", 1),
-        fredSeries("SOFR", 1),
-        fredSeries("DGS10", 1),
-        fredSeries("DGS2", 1),
-        fredSeries("DGS3MO", 1),
+      const [effr, sofr, curve, cpi, unrate] = await Promise.all([
+        nyFedRate("effr", 1),
+        nyFedRate("sofr", 1),
+        treasuryYieldCurve(1),
         fredSeries("CPIAUCSL", 2),
         fredSeries("UNRATE", 1)
       ]);
-      const t10 = parseFloat(t10y.observations?.[0]?.value || 0);
-      const t2  = parseFloat(t2y.observations?.[0]?.value || 0);
-      const t3mV = parseFloat(t3m.observations?.[0]?.value || 0);
+      const latestCurve = curve.observations?.[0];
+      const t10 = parseFloat(latestCurve?.yields?.["10y"] || 0);
+      const t2  = parseFloat(latestCurve?.yields?.["2y"] || 0);
+      const t3mV = parseFloat(latestCurve?.yields?.["3m"] || 0);
       const cpiVals = cpi.observations || [];
       const cpiYoY = cpiVals.length >= 2
         ? (((parseFloat(cpiVals[0].value) - parseFloat(cpiVals[1].value)) / parseFloat(cpiVals[1].value)) * 100 * 12).toFixed(2)
         : "N/A";
       return {
-        source: "FRED + NY Fed",
+        source: `NY Fed Markets API + U.S. Treasury XML + FRED macro series. ${NYFED_NOTICE} ${FRED_NOTICE}`,
         snapshot_date: new Date().toISOString().split("T")[0],
         rates: {
           fed_funds_rate: effr.observations?.[0],
           sofr: sofr.observations?.[0],
-          treasury_10y: t10y.observations?.[0],
-          treasury_2y: t2y.observations?.[0],
-          treasury_3m: t3m.observations?.[0]
+          treasury_10y: { date: latestCurve?.date, value: latestCurve?.yields?.["10y"] },
+          treasury_2y: { date: latestCurve?.date, value: latestCurve?.yields?.["2y"] },
+          treasury_3m: { date: latestCurve?.date, value: latestCurve?.yields?.["3m"] }
         },
         spreads: {
           "2y10y_bps": ((t10 - t2) * 100).toFixed(1),
@@ -801,7 +908,7 @@ async function handleTool(name, args) {
       const results = {};
       if (s === "headline" || s === "all") results.headline_cpi = await fredSeries("CPIAUCSL", months);
       if (s === "core" || s === "all") results.core_cpi = await fredSeries("CPILFESL", months);
-      return { source: "FRED / BLS", cpi_data: results };
+      return { source: `FRED / BLS. ${FRED_NOTICE}`, cpi_data: results };
     }
 
     case "get_fed_balance_sheet": {
@@ -813,7 +920,7 @@ async function handleTool(name, args) {
         fredSeries("WRESBAL", weeks)
       ]);
       return {
-        source: "FRED / Federal Reserve H.4.1",
+        source: `FRED / Federal Reserve H.4.1. ${FRED_NOTICE}`,
         fed_balance_sheet: {
           total_assets: total.observations,
           treasury_securities: treasuries.observations,
@@ -826,12 +933,26 @@ async function handleTool(name, args) {
     case "get_ofr_stress_index": {
       const data = await fredSeries("STLFSI4", args.days || 30);
       return {
-        source: "Federal Reserve Bank of St. Louis via FRED",
+        source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`,
         series_id: "STLFSI4",
         index_name: "St. Louis Fed Financial Stress Index",
         description: "Values above 0 indicate above-average financial stress. Verana L0 systemic stress signal.",
         stress_index: data.observations
       };
+    }
+
+    case "get_ofr_financial_stress_index": {
+      const days = Math.min(Math.max(Number(args.days) || 30, 1), 1000);
+      const csv = await get(OFR_FSI_CSV);
+      if (csv?.error || typeof csv !== "string") return { error: csv?.error || "OFR FSI publication unavailable", unavailable: true };
+      const lines = csv.trim().split(/\r?\n/);
+      const headers = parseCsvLine(lines[0]);
+      if (headers[0] !== "Date" || headers[1] !== "OFR FSI") return { error: "OFR FSI schema did not match the published form", unavailable: true };
+      const observations = lines.slice(1).filter(Boolean).slice(-days).map((line) => {
+        const values = parseCsvLine(line);
+        return Object.fromEntries(headers.map((header, index) => [header, index === 0 ? values[index] : Number(values[index])]));
+      });
+      return { observations, source: "Office of Financial Research Financial Stress Index", source_url: OFR_FSI_CSV, caveat: "Informational; OFR says this monitor should not be relied upon for financial decisions." };
     }
 
     case "get_money_market_rates": {
@@ -847,18 +968,18 @@ async function handleTool(name, args) {
       for (const i of insts) {
         if (SERIES[i]) results[i] = await fredSeries(SERIES[i], days);
       }
-      return { source: "FRED / Federal Reserve", money_market_rates: results };
+      return { source: `FRED / Federal Reserve. ${FRED_NOTICE}`, money_market_rates: results };
     }
 
     case "get_repo_market_context": {
       const days = args.days || 10;
       const [segments, sofr, bgcr, tgcr] = await Promise.all([
         handleTool("get_cleared_repo_segments", {}),
-        get(`${NYFED_BASE}/rates/sofr/last/${days}.json`),
-        get(`${NYFED_BASE}/rates/bgcr/last/${days}.json`),
-        get(`${NYFED_BASE}/rates/tgcr/last/${days}.json`)
+        get(`${NYFED_BASE}/rates/secured/sofr/last/${days}.json`),
+        get(`${NYFED_BASE}/rates/secured/bgcr/last/${days}.json`),
+        get(`${NYFED_BASE}/rates/secured/tgcr/last/${days}.json`)
       ]);
-      return { source: "OFR STFM + Federal Reserve Bank of New York", as_of: new Date().toISOString(),
+      return { source: `OFR STFM + Federal Reserve Bank of New York. ${NYFED_NOTICE}`, as_of: new Date().toISOString(),
         cleared_segments: segments, reference_rates: {
           SOFR: { series_id: "SOFR", observations: sofr.refRates || sofr },
           BGCR: { series_id: "BGCR", observations: bgcr.refRates || bgcr },
@@ -884,16 +1005,70 @@ async function handleTool(name, args) {
       return { source: "OFR Short-term Funding Monitor", retrieved_at: new Date().toISOString(), observations };
     }
 
-    case "get_term_sofr": {
-      const tenor = args.tenor || "all";
-      const days = args.days || 10;
-      const SERIES = { "1m": "SOFR1", "3m": "SOFR3", "6m": "SOFR6", "12m": "SOFR12" };
-      const tenors = tenor === "all" ? Object.keys(SERIES) : [tenor];
-      const results = {};
-      for (const t of tenors) {
-        if (SERIES[t]) results[t] = await fredSeries(SERIES[t], days);
+    case "get_sec_fails_to_deliver": {
+      const cusip = String(args.cusip || "").trim().toUpperCase();
+      if (!/^[0-9A-Z*@#]{9}$/.test(cusip)) return { error: "cusip must be exactly 9 valid CUSIP characters", unavailable: true };
+      let periodUrl = args.period_url;
+      if (!periodUrl) {
+        const page = await get("https://www.sec.gov/data-research/sec-markets-data/fails-deliver-data");
+        if (page?.error || typeof page !== "string") return { error: page?.error || "SEC period index unavailable", unavailable: true };
+        const match = page.match(/href=["']([^"']+\.zip)["']/i);
+        if (!match) return { error: "SEC period ZIP could not be discovered", unavailable: true };
+        periodUrl = new URL(match[1], "https://www.sec.gov").href;
       }
-      return { source: "FRED — CME Term SOFR", term_sofr: results };
+      if (!/^https:\/\/(www\.)?sec\.gov\//i.test(periodUrl)) return { error: "period_url must be an SEC HTTPS URL", unavailable: true };
+      const archive = await getBinary(periodUrl);
+      if (archive?.error) return { error: archive.error, unavailable: true, source_url: periodUrl };
+      try {
+        const zip = new AdmZip(archive);
+        const entry = zip.getEntries().find((item) => !item.isDirectory && /\.(txt|csv)$/i.test(item.entryName));
+        if (!entry) return { error: "SEC archive contained no data file", unavailable: true, source_url: periodUrl };
+        const lines = entry.getData().toString("utf8").split(/\r?\n/).filter(Boolean);
+        const rows = lines.slice(1).map((line) => line.split("|")).filter((cols) => cols[1]?.toUpperCase() === cusip).map((cols) => ({
+          settlement_date: cols[0], cusip: cols[1], symbol: cols[2] || null, quantity: Number(cols[3]),
+          description: cols[4] || null, previous_close_price: cols[5] === "." ? null : Number(cols[5]),
+        }));
+        return { cusip, observations: rows, source: "SEC Fails-to-Deliver Data", source_url: periodUrl, caveat: "Quantity is the aggregate net balance outstanding, not a count of new fails. SEC does not guarantee accuracy." };
+      } catch (error) {
+        return { error: `SEC archive could not be parsed: ${error.message}`, unavailable: true, source_url: periodUrl };
+      }
+    }
+
+    case "lookup_lei": {
+      const lei = String(args.lei || "").trim().toUpperCase();
+      if (!/^[0-9A-Z]{20}$/.test(lei)) return { error: "lei must be exactly 20 alphanumeric characters", unavailable: true };
+      const data = await get(`${GLEIF_BASE}/lei-records/${lei}`);
+      if (data?.error) return { error: data.error, unavailable: true };
+      if (!data?.data) return { error: "GLEIF returned no LEI record", unavailable: true };
+      return { record: data.data, source: "GLEIF LEI API", license: "CC0" };
+    }
+
+    case "map_cusip_to_figi": {
+      const cusip = String(args.cusip || "").trim().toUpperCase();
+      if (!/^[0-9A-Z*@#]{9}$/.test(cusip)) return { error: "cusip must be exactly 9 valid CUSIP characters", unavailable: true };
+      const data = await post(`${OPENFIGI_BASE}/mapping`, [{ idType: "ID_CUSIP", idValue: cusip }]);
+      if (data?.error) return { error: data.error, unavailable: true };
+      const mapping = data?.[0];
+      if (!mapping || mapping.error || !Array.isArray(mapping.data)) return { error: mapping?.error || "OpenFIGI returned no mapping", unavailable: true };
+      return { cusip, mappings: mapping.data, source: "OpenFIGI API", storage: "No identifier database is stored or republished." };
+    }
+
+    case "screen_ofac_sdn": {
+      const query = String(args.name || "").trim();
+      if (!query) return { error: "name is required", unavailable: true };
+      const csv = await get(OFAC_SDN_CSV);
+      if (csv?.error || typeof csv !== "string") return { error: csv?.error || "OFAC SDN publication unavailable", unavailable: true };
+      const normalized = query.toLocaleUpperCase("en-US");
+      const matches = csv.split(/\r?\n/).filter(Boolean).map(parseCsvLine).filter((cols) => String(cols[1] || "").trim().toLocaleUpperCase("en-US") === normalized).map((cols) => ({ ent_num: cols[0], name: cols[1], type: cols[2], program: cols[3], title: cols[4] || null }));
+      return { query, exact_match: matches.length > 0, matches, source: "U.S. Treasury OFAC Sanctions List Service — SDN.csv", source_url: OFAC_SDN_CSV, caveat: "Exact-name advisory screen only; a non-match is not sanctions clearance." };
+    }
+
+    case "get_treasury_average_interest_rates": {
+      const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 100);
+      const endpoint = `${TREASURY_BASE}/accounting/od/avg_interest_rates`;
+      const data = await get(endpoint, { "page[size]": limit, sort: "-record_date" });
+      if (data?.error || !Array.isArray(data?.data)) return { error: data?.error || "Treasury Fiscal Data unavailable", unavailable: true };
+      return { observations: data.data, meta: data.meta || null, source: "U.S. Treasury Fiscal Data", source_url: endpoint };
     }
 
     case "get_recent_13f_filers": {
@@ -943,18 +1118,17 @@ async function handleTool(name, args) {
       // rail state in parallel so the DSOR context includes a chain
       // recommendation alongside rates + stress.
       const prices = await getLivePrices();
-      const [sofr, t10y, t2y, t3m, stress, rrp, rails] = await Promise.all([
-        fredSeries("SOFR", 1),
-        fredSeries("DGS10", 1),
-        fredSeries("DGS2", 1),
-        fredSeries("DGS3MO", 1),
+      const [sofr, curve, stress, rrp, rails] = await Promise.all([
+        nyFedRate("sofr", 1),
+        treasuryYieldCurve(1),
         fredSeries("STLFSI4", 1),
         fredSeries("RRPONTSYD", 1),
         multichainGas(prices),
       ]);
-      const t10 = parseFloat(t10y.observations?.[0]?.value || 0);
-      const t2  = parseFloat(t2y.observations?.[0]?.value || 0);
-      const t3mV = parseFloat(t3m.observations?.[0]?.value || 0);
+      const latestCurve = curve.observations?.[0];
+      const t10 = parseFloat(latestCurve?.yields?.["10y"] || 0);
+      const t2  = parseFloat(latestCurve?.yields?.["2y"] || 0);
+      const t3mV = parseFloat(latestCurve?.yields?.["3m"] || 0);
       const ofrRaw = stress.observations?.[0]?.value;
       const ofrVal = ofrRaw !== undefined && ofrRaw !== null ? parseFloat(ofrRaw) : null;
       const ofrUsable = isUsableStressReading(ofrVal);
@@ -973,14 +1147,14 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: "FRED + NY Fed + Blockscout + Solana RPC",
+        source: `NY Fed Markets API + U.S. Treasury XML + FRED STLFSI4/RRP + Blockscout + Solana RPC. ${NYFED_NOTICE} ${FRED_NOTICE}`,
         dsor_context_date: new Date().toISOString(),
         description: "Cato Sec pre-settlement doctrine check — DSOR governance context snapshot (v0.2.0 multi-chain)",
         rates: {
           sofr: sofr.observations?.[0],
-          treasury_10y: t10y.observations?.[0],
-          treasury_2y: t2y.observations?.[0],
-          treasury_3m: t3m.observations?.[0]
+          treasury_10y: { date: latestCurve?.date, value: latestCurve?.yields?.["10y"] },
+          treasury_2y: { date: latestCurve?.date, value: latestCurve?.yields?.["2y"] },
+          treasury_3m: { date: latestCurve?.date, value: latestCurve?.yields?.["3m"] }
         },
         spreads: {
           "2y10y_bps": ((t10 - t2) * 100).toFixed(1),
@@ -1013,7 +1187,7 @@ async function handleTool(name, args) {
     case "get_onchain_prices": {
       const prices = await getLivePrices();
       return {
-        source: "CoinGecko public API",
+        source: `CoinGecko public API. ${COINGECKO_NOTICE}`,
         eth_usd: prices.eth,
         sol_usd: prices.sol,
         xrp_usd: prices.xrp,
@@ -1029,7 +1203,7 @@ async function handleTool(name, args) {
       const prices = await getLivePrices();
       const rails = await multichainGas(prices);
       return {
-        source: "Blockscout (ETH/Base/Arbitrum) + Solana RPC + XRPL JSON-RPC + CoinGecko",
+        source: `Blockscout (ETH/Base/Arbitrum) + Solana RPC + XRPL JSON-RPC + CoinGecko. ${COINGECKO_NOTICE}`,
         timestamp: new Date().toISOString(),
         price_sources: {
           eth_usd: prices.eth,
@@ -1047,7 +1221,7 @@ async function handleTool(name, args) {
     case "get_tokenized_settlement_context": {
       const [chain, sofr, stress] = await Promise.all([
         blockscoutStats(),
-        fredSeries("SOFR", 1),
+        nyFedRate("sofr", 1),
         fredSeries("STLFSI4", 1)
       ]);
       const gas_gwei = chain?.gas_gwei;
@@ -1074,7 +1248,7 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: "Blockscout + FRED (SOFR, STLFSI4)",
+        source: `Blockscout + NY Fed SOFR + FRED STLFSI4. ${NYFED_NOTICE} ${FRED_NOTICE}`,
         timestamp: new Date().toISOString(),
         gas_gwei,
         sofr_rate,
@@ -1098,7 +1272,7 @@ async function handleTool(name, args) {
       // alongside OFR stress.
       const prices = await getLivePrices();
       const [sofrSeries, stressSeries, rails] = await Promise.all([
-        fredSeries("SOFR", 2),
+        nyFedRate("sofr", 2),
         fredSeries("STLFSI4", 1),
         multichainGas(prices),
       ]);
@@ -1205,7 +1379,7 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: "FRED (SOFR, STLFSI4) + Blockscout (ETH/Base/Arbitrum) + Solana RPC + XRPL JSON-RPC + CoinGecko",
+        source: `NY Fed SOFR + FRED STLFSI4 + Blockscout + Solana RPC + XRPL JSON-RPC + CoinGecko. ${NYFED_NOTICE} ${FRED_NOTICE} ${COINGECKO_NOTICE}`,
         timestamp: new Date().toISOString(),
         inputs: {
           notional_usd,
@@ -1258,7 +1432,7 @@ async function handleTool(name, args) {
         handleTool("cato_sec", {}),
         handleTool("get_tokenized_settlement_context", {}),
         multichainGas(prices),
-        fredSeries("SOFR", 2),
+        nyFedRate("sofr", 2),
       ]);
 
       // A failed FRED fetch leaves no observation: that is an unusable
@@ -1344,7 +1518,7 @@ async function handleTool(name, args) {
 
 // ── SERVER SETUP ─────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "cato_sec", version: "0.3.2" },
+  { name: "cato_sec", version: "0.5.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -1371,7 +1545,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato Sec MCP Server v0.3.2 running — 24 tools across NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout (ETH/Base/Arbitrum), Solana RPC, XRPL JSON-RPC, CoinGecko. Read-only advisory data layer; no tool routes or settles a trade. SOFR delta funding-shock detector active. XRPL rail live — deterministic-finality preference doctrine in effect.\n");
+  process.stderr.write("Cato Sec MCP Server v0.5.0 running — 29 tools across primary public sources and explicitly noticed fallbacks. Read-only advisory data layer; no tool routes or settles a trade.\n");
 }
 
 if (require.main === module) {
