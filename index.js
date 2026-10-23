@@ -129,6 +129,8 @@ const {
   CATO_SOFR_DELTA_HOLD_BPS,
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
+  ADVISORY_NOTICE,
+  eligibleRails,
   isUsableStressReading,
   stressReadingFromObservation,
   computeGateDecision,
@@ -740,11 +742,15 @@ const TOOLS = [
   },
   {
     name: "compare_settlement_rails",
-    description: `Given a notional repo trade size in USD, estimate all-in cost on every supported settlement rail (FICC traditional, Ethereum L1, Base L2, Arbitrum L2, Solana, XRPL) and return a ranked table cheapest-to-most-expensive plus a recommended rail. FICC rail: ${FICC_CLEARING_FEE_BPS}bps clearing fee net of ${FICC_NETTING_BENEFIT_PCT}% netting benefit, plus SOFR cost-of-capital for the term. EVM rails: gas_gwei × 65000 × 1e-9 × live ETH price. Solana: (base 5000 + median priority) lamports × live SOL price. XRPL: max(open_ledger_fee, base_fee) drops × 1e-6 × live XRP price (~4s deterministic finality). Advisory ranking logic respects OFR stress (forces FICC), SOFR delta shocks (forces FICC), and gas spikes (forces FICC) before rail selection; at equal ultra-low cost XRPL is preferred over Solana on deterministic-finality grounds (v0.3.0 doctrine). Does not route or settle any trade.`,
+    description: `Eligibility-first advisory cost comparison. A CUSIP Treasury is considered only for declared FICC/Fedwire entitlements; a tokenized fund is considered only on declared chain entitlements. Cost ranks eligible rails only. ${ADVISORY_NOTICE}. Does not route, clear, or settle a trade.`,
     inputSchema: { type: "object", properties: {
       notional_usd: { type: "number", description: "Notional trade size in USD" },
-      term_days: { type: "number", description: "Settlement term in days (default 1 for overnight repo)", default: 1 }
-    }, required: ["notional_usd"] }
+      term_days: { type: "number", description: "Settlement term in days (default 1 for overnight repo)", default: 1 },
+      instrument_type: { type: "string", enum: ["cusip_treasury", "tokenized_fund"] },
+      ficc_member: { type: "boolean", default: false },
+      fedwire_entitled: { type: "boolean", default: false },
+      chain_entitlements: { type: "array", items: { type: "string", enum: ["ethereum_l1", "base", "arbitrum", "solana", "xrpl"] }, default: [] }
+    }, required: ["notional_usd", "instrument_type"] }
   },
   {
     name: "get_atomic_settlement_gate",
@@ -1265,6 +1271,10 @@ async function handleTool(name, args) {
         return { error: "notional_usd is required and must be a positive number" };
       }
       const term_days = args.term_days || 1;
+      const eligible = eligibleRails(args);
+      if (eligible.length === 0) {
+        return { advisory: ADVISORY_NOTICE, error: "No eligible settlement rail for the declared instrument and entitlements", eligible_rails: [], ranked: [], recommended_rail: null };
+      }
 
       // v0.2.2: fetch live ETH/SOL prices, SOFR with 2 observations
       // (today + prior day for delta), OFR FSI, and multichainGas in
@@ -1347,7 +1357,7 @@ async function handleTool(name, args) {
 
       // Ranked cheapest → most expensive (excluding rails with null cost).
       const ranked = Object.entries(railTable)
-        .filter(([, r]) => typeof r.cost_usd === "number")
+        .filter(([name, r]) => eligible.includes(name) && typeof r.cost_usd === "number")
         .sort((a, b) => a[1].cost_usd - b[1].cost_usd)
         .map(([name, r]) => ({ rail: name, cost_usd: r.cost_usd, speed: r.speed, status: r.status }));
 
@@ -1357,29 +1367,30 @@ async function handleTool(name, args) {
       const solana_fee_usd = rails.solana.fee_usd_estimate;
       const xrpl_fee_usd = rails.xrpl.fee_usd_estimate;
 
-      let recommended_rail;
+      let recommended_rail = ranked[0]?.rail || null;
+      const chainEligible = eligible.filter((rail) => ["ethereum_l1", "base", "arbitrum", "solana", "xrpl"].includes(rail));
+      const ficcEligible = eligible.includes("ficc_traditional");
       if (!stress_reading_usable) {
-        recommended_rail = "ficc_traditional";            // stress reading unusable — hold to the safe rail, don't guess
+        recommended_rail = ficcEligible ? "ficc_traditional" : null;
       } else if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
-        recommended_rail = "ficc_traditional";            // OFR stress override
+        recommended_rail = ficcEligible ? "ficc_traditional" : null;
       } else if (sofrDeltaBps !== null && sofrDeltaBps > CATO_SOFR_DELTA_HOLD_BPS) {
-        recommended_rail = "ficc_traditional";            // SOFR delta override (v0.2.2)
-      } else if (notional_usd > 10_000_000 && eth_gas !== null && eth_gas < 30) {
+        recommended_rail = ficcEligible ? "ficc_traditional" : null;
+      } else if (chainEligible.includes("ethereum_l1") && notional_usd > 10_000_000 && eth_gas !== null && eth_gas < 30) {
         recommended_rail = "ethereum_l1";                 // large notional, gas is noise
-      } else if (xrpl_fee_usd !== null && xrpl_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
+      } else if (chainEligible.includes("xrpl") && xrpl_fee_usd !== null && xrpl_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
         recommended_rail = "xrpl";                        // ultra-low cost + deterministic ~4s finality (v0.3.0)
-      } else if (solana_fee_usd !== null && solana_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
+      } else if (chainEligible.includes("solana") && solana_fee_usd !== null && solana_fee_usd < CATO_ULTRA_LOW_FEE_USD) {
         recommended_rail = "solana";                      // ultra-low cost, probabilistic-speed tier
-      } else if (base_gas !== null && base_gas < 1) {
+      } else if (chainEligible.includes("base") && base_gas !== null && base_gas < 1) {
         recommended_rail = "base";                        // L2 default when available
-      } else if (eth_gas !== null && eth_gas > CATO_GAS_GWEI_HOLD_THRESHOLD) {
-        recommended_rail = "ficc_traditional";            // gas too high
-      } else {
+      } else if (chainEligible.includes("ethereum_l1")) {
         recommended_rail = "ethereum_l1";                 // fallback
       }
 
       return {
         source: `NY Fed SOFR + FRED STLFSI4 + Blockscout + Solana RPC + XRPL JSON-RPC + CoinGecko. ${NYFED_NOTICE} ${FRED_NOTICE} ${COINGECKO_NOTICE}`,
+        advisory: ADVISORY_NOTICE,
         timestamp: new Date().toISOString(),
         inputs: {
           notional_usd,
@@ -1412,6 +1423,7 @@ async function handleTool(name, args) {
           note: "Live prices via CoinGecko public API. For institutional deployment use a licensed price feed (Bloomberg BVAL, Refinitiv, Chainlink Price Feeds).",
         },
         rails: railTable,
+        eligible_rails: eligible,
         ranked,
         recommended_rail,
         doctrine_note: "On-chain atomic DvP eliminates T+1 counterparty risk window. FICC clearing provides netting benefit at scale. Cato Sec routes by notional, gas, OFR stress, AND SOFR 1-day delta — stress overrides (OFR > 0.5 or |SOFR delta| > 10 bps) are absolute and force ficc_traditional. v0.3.0 doctrine: at equal ultra-low cost (< $0.01) XRPL is preferred over Solana because deterministic single-ledger finality (~4s, no probabilistic confirmation window) dominates raw speed for institutional DvP settlement.",

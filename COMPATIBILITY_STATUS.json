@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "assessed_on": "2026-09-22",
+  "assessed_on": "2026-10-23",
   "counterpart": "br-collab/aureon:aureon/mcp/cato_client.py",
   "status": "INCOMPATIBLE",
   "scope": "decision outputs and production inputs",
@@ -9,9 +9,9 @@
       "id": "xrpl-routing",
       "kind": "decision-output",
       "cato_sec": "prefers xrpl below the shared ultra-low-fee threshold",
-      "counterpart": "has no xrpl branch and selects solana for parity vector V17",
-      "evidence": "br-collab/aureon parity/cato_golden_vectors.json V17",
-      "resolved": false
+      "counterpart": "prefers xrpl below the same threshold from aureon GR-1",
+      "evidence": "br-collab/aureon parity/cato_golden_vectors.json V17; 17/17 parity PASS",
+      "resolved": true
     },
     {
       "id": "production-stress-series",
@@ -22,5 +22,5 @@
       "resolved": false
     }
   ],
-  "meaning": "Golden-vector agreement outside declared gaps is not production compatibility."
+  "meaning": "Decision outputs agree across the full executable vector set. Production compatibility remains false while the stress-series input differs."
 }
