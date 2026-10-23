@@ -16,11 +16,11 @@
     {
       "id": "production-stress-series",
       "kind": "production-input",
-      "cato_sec": "St. Louis Fed Financial Stress Index (FRED STLFSI4)",
-      "counterpart": "OFR Financial Stress Index or a derived proxy",
-      "evidence": "Cato Sec index.js and br-collab/aureon server.py input wiring",
+      "cato_sec": "OFR Financial Stress Index in normal operation; HOLD when the OFR feed is unusable (v0.6.0)",
+      "counterpart": "OFR Financial Stress Index in normal operation; a VIX, high-yield and curve proxy when the OFR feed is unavailable",
+      "evidence": "Cato Sec index.js ofrFsiSeries and br-collab/aureon server.py input wiring; thresholds 0.5/1.0 are PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI",
       "resolved": false
     }
   ],
-  "meaning": "Decision outputs agree across the full executable vector set. Production compatibility remains false while the stress-series input differs."
+  "meaning": "Decision outputs agree across the full executable vector set. Both sides read the OFR FSI in normal operation; production compatibility remains false because outage-time stress inputs differ."
 }

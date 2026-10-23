@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0, 23 Oct 2026
+
+### CLOSE-1 WP1: FRED removed (CATO-D2 Annex A v0.2 executed)
+
+- Cato calls no FRED endpoint. The FRED client, `FRED_API_KEY` and the FRED notice are
+  removed; `test/no_fred.test.js` fails if any return in source or configuration.
+- The gate stress input is the OFR Financial Stress Index (decision D1, Bill, 23 Oct
+  2026), read from OFR's own daily publication. Thresholds 0.5 and 1.0 are unchanged and
+  labelled `PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI` in code, README and every
+  stress-reading output; recalibration is a separate order.
+- TIPS real yields come from Treasury's daily real yield curve; breakevens are computed
+  nominal minus real. CPI and unemployment come from the BLS public API and fail closed.
+- `get_fed_balance_sheet`, `get_money_market_rates` and the ON RRP volume in `cato_sec`
+  are declared not served, naming their primary publications, until a verified parser is
+  admitted.
+- Gate decisions for identical inputs are unchanged; parity compares decisions only.
+
 ## 0.5.0 — 23 Oct 2026
 
 ### CATO-D2 — license truth and free primary sources

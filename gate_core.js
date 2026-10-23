@@ -24,6 +24,11 @@
  */
 
 // Doctrine thresholds (Duffie 2025, Brookings; Cato Sec v0.2.2 backtest).
+// CLOSE-1 decision D1 (Bill, 23 Oct 2026): the stress input is the OFR Financial
+// Stress Index. The 0.5 and 1.0 values were backtested on STLFSI4 only, so on
+// the OFR FSI they are provisional policy, not a calibration. Recalibration is
+// a separate order. Values unchanged; decisions for identical inputs unchanged.
+const STRESS_THRESHOLD_STATUS = "PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI";
 const CATO_OFR_ESCALATE_THRESHOLD = 1.0;
 const CATO_OFR_HOLD_THRESHOLD = 0.5;
 const CATO_GAS_GWEI_HOLD_THRESHOLD = 50.0;
@@ -60,7 +65,7 @@ function eligibleRails({ instrument_type, ficc_member = false, fedwire_entitled 
 
 /**
  * True only for a real, finite number — the one shape a systemic-stress
- * reading must have to be usable. NaN (e.g. parseFloat(".") on a FRED
+ * reading must have to be usable. NaN (e.g. parseFloat(".") on a
  * "missing observation" marker), +/-Infinity, null, undefined, and
  * non-numeric types all fail this. A caller must never default a failed
  * check here to a value that reads as "clear" (see 2026-08-21 audit: a
@@ -71,12 +76,12 @@ function isUsableStressReading(value) {
 }
 
 /**
- * One FRED observation — or its absence — to a stress reading. A failed
+ * One OFR FSI observation — or its absence — to a stress reading. A failed
  * fetch leaves no observation, which yields null; a present value is
- * parsed as-is, so FRED's "." marker still yields NaN. Both then fail
+ * parsed as-is, so a non-numeric marker still yields NaN. Both then fail
  * isUsableStressReading and HOLD. It never substitutes a number for a
  * reading it does not have: the gate handler's `value ?? "0"` turned a
- * FRED outage into PROCEED / "All doctrine thresholds clear"
+ * feed outage into PROCEED / "All doctrine thresholds clear"
  * (br-collab/aureon#12).
  */
 function stressReadingFromObservation(observation) {
@@ -86,7 +91,7 @@ function stressReadingFromObservation(observation) {
 
 /**
  * Pure Cato Sec gate decision. Inputs:
- *   ofr_stress     — St. Louis Fed STLFSI4 value; must be a finite number to be
+ *   ofr_stress     — OFR Financial Stress Index value; must be a finite number to be
  *                    usable (see isUsableStressReading). An unusable
  *                    reading HOLDs — it never falls through to PROCEED.
  *   gas_gwei       — ETH L1 gas in gwei, or null/undefined if unavailable
@@ -104,7 +109,7 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
     return {
       gate_decision: "HOLD",
       reasons: [
-        `St. Louis Fed stress reading is not a usable number (got ${JSON.stringify(ofr_stress)}) — ` +
+        `OFR FSI stress reading is not a usable number (got ${JSON.stringify(ofr_stress)}) — ` +
           "feed missing or malformed; holding rather than assuming clear",
       ],
       recommended_rail: "traditional",
@@ -115,12 +120,12 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
   if (ofr_stress > CATO_OFR_ESCALATE_THRESHOLD) {
     gate_decision = "ESCALATE";
     recommended_rail = "human_authority";
-    reasons.push(`St. Louis Fed stress index at ${ofr_stress.toFixed(2)} — systemic stress threshold (>${CATO_OFR_ESCALATE_THRESHOLD}) breached`);
+    reasons.push(`OFR FSI at ${ofr_stress.toFixed(2)} — systemic stress threshold (>${CATO_OFR_ESCALATE_THRESHOLD}, provisional policy) breached`);
   } else {
     // HOLD if non-systemic friction
     if (ofr_stress > CATO_OFR_HOLD_THRESHOLD) {
       gate_decision = "HOLD";
-      reasons.push(`St. Louis Fed stress index at ${ofr_stress.toFixed(2)} — above-average stress (>${CATO_OFR_HOLD_THRESHOLD})`);
+      reasons.push(`OFR FSI at ${ofr_stress.toFixed(2)} — above-average stress (>${CATO_OFR_HOLD_THRESHOLD}, provisional policy)`);
     }
     if (gas_gwei !== null && gas_gwei !== undefined && gas_gwei > CATO_GAS_GWEI_HOLD_THRESHOLD) {
       gate_decision = "HOLD";
@@ -185,6 +190,7 @@ module.exports = {
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
   ADVISORY_NOTICE,
+  STRESS_THRESHOLD_STATUS,
   eligibleRails,
   isUsableStressReading,
   stressReadingFromObservation,

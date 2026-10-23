@@ -64,7 +64,7 @@ are implementation details and may change without forming a package-level API.
 ### Governance Gates
 
 - `cato_sec` — Pre-settlement DSOR doctrine context: SOFR, 10y, 2y10y spread,
-  St. Louis Fed stress, fed liquidity posture.
+  OFR Financial Stress Index (gate input, provisional thresholds), fed liquidity posture.
 - `get_atomic_settlement_gate` — Verana L0 multi-chain doctrine gate. Returns
   `PROCEED` / `HOLD` / `ESCALATE` plus `recommended_chain`.
 
@@ -74,8 +74,8 @@ are implementation details and may change without forming a package-level API.
 > in [br-collab/Project-Atreides](https://github.com/br-collab/Project-Atreides)
 > (`atreides/rails/cato_cash.py`), is a separate in-process gate for the **cash**
 > settlement rail; it emits `PROCEED` / `HOLD` / `ESCALATE` with a rail and a
-> finality class. The components are designed as counterparts and share the same OFR
-> STLFSI4 stress thresholds, but they are different components answering
+> finality class. The components are designed as counterparts and share the same 0.5 / 1.0
+> stress threshold values, but they are different components answering
 > different questions on different surfaces. Not interchangeable.
 
 ### Settlement Rails
@@ -83,7 +83,7 @@ are implementation details and may change without forming a package-level API.
 - `compare_settlement_rails` — All-in cost across FICC traditional,
   Ethereum L1, Base, Arbitrum, Solana, XRPL for a given notional. Returns
   ranked table cheapest-to-most-expensive plus a recommended rail.
-- `get_tokenized_settlement_context` — Combined ETH gas + SOFR + St. Louis Fed stress
+- `get_tokenized_settlement_context` — Combined ETH gas + SOFR + OFR FSI stress
   into a single posture: `favorable` / `monitor` / `elevated`.
 - `get_multichain_gas` — Live gas/fee state across Ethereum, Base, Arbitrum,
   Solana, XRPL, plus the documented `fed_l1` PORTS placeholder.
@@ -100,7 +100,7 @@ are implementation details and may change without forming a package-level API.
 - `get_repo_reference_rates` — SOFR, BGCR, TGCR.
 - `get_effr` — Effective Federal Funds Rate.
 - `get_repo_operations` — Fed open market repo and reverse repo operations.
-- `get_money_market_rates` — Commercial paper, banker acceptances, CDs.
+- `get_money_market_rates` — Not served since v0.6.0 (its source was FRED); returns a declared absence naming the Federal Reserve Board commercial paper release.
 - `get_cleared_repo_segments` — OFR STFM FICC DVP, FICC GCF, and tri-party
   preliminary average rates and transaction volumes with series IDs and dates.
 - `get_repo_market_context` — Those cleared segments beside NY Fed SOFR, BGCR,
@@ -111,8 +111,17 @@ are implementation details and may change without forming a package-level API.
 
 A section is admitted only when all three tests pass: the data may be redistributed,
 a governance gate exists, and a named consumer exists. “Publicly visible” is not a
-license. Cato does not store, cache, archive, or republish FRED API content; it makes
-live requests only and returns one response to the caller. The cancelled
+license. Since v0.6.0 Cato calls no FRED endpoint at all (CLOSE-1 WP1, CATO-D2 Annex A
+v0.2). The FRED Services Terms of Use (fred.stlouisfed.org/legal, read 23 Oct 2026), in
+"Summarized Terms, II. Prohibited Use", bar use of FRED Services or Content "in connection
+with the development or training of any software program or system or machine learning",
+and in "Prohibitions for FRED Services and FRED Content" bar storing, caching or archiving
+any portion of FRED content. The same terms permit, in "I. Intended and Permissible Use",
+creating an app using a subset of FRED data through the free API and conducting research,
+and in "IV. Commercial Use", internal commercial use of series labelled public domain or
+citation-required. Cato does not rely on those permissions: as a project rule, stricter
+than the terms, every series is read from its primary publisher or not served. A test
+(`test/no_fred.test.js`) fails if a FRED endpoint, key or client returns. The cancelled
 `fred_historical_ingest`/ArcticDB plan is not part of this server.
 
 | Section | Source | License basis | Gate | Named consumer | Status |
@@ -120,13 +129,15 @@ live requests only and returns one response to the caller. The cancelled
 | Treasury rates and auctions | U.S. Treasury XML and Fiscal Data | U.S. government works; public APIs | Cato Sec | Aureon and Atreides | Admitted |
 | NY Fed reference rates | NY Fed Markets API | NY Fed Terms of Use permit use, copying and distribution with the required notice | Cato Sec | Aureon and Atreides | Admitted |
 | Repo | OFR STFM API | OFR calls it an open public interface requiring no token or registration | Cato Sec / Cato Cash | Aureon and Atreides | Admitted |
-| OFR Financial Stress Index | OFR daily publication | U.S. government work, subject to OFR's third-party-data disclaimer | Informational only; the existing gate continues to use STLFSI4 | Aureon research | Admitted as context, not a gate input |
+| OFR Financial Stress Index | OFR daily publication | U.S. government work, subject to OFR's third-party-data disclaimer | Cato Sec stress input; thresholds 0.5 / 1.0 are `PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI` | Aureon and Atreides | Admitted as the gate stress input (v0.6.0) |
 | SEC fails to deliver | SEC twice-monthly files | U.S. government work | Atreides Rule 204 controls | Atreides CNS fails checks | Admitted as market context |
 | Party identity | GLEIF API | CC0 1.0 via the required API Access Service | Account-master identity controls | Attested crossings and account master | Admitted |
 | Instrument identity | OpenFIGI API | FIGI identifiers dedicated to the public domain; no CUSIP database is stored or published | Fixture admission controls | OMS-1 / EQ-1 fixtures | Admitted |
 | Sanctions | Treasury OFAC Sanctions List Service | U.S. government work | Account-master sanctions control | Account master | Admitted as exact-name advisory screening |
 | Digital assets | CoinGecko public API and public rail RPCs | Public API use with attribution; no redistribution claim beyond the live response | Atomic-settlement gate | Aureon | Admitted |
-| FRED residual series | FRED API, only when FRED owns the series or no primary feed is admitted | Live pass-through under FRED API terms; no cache/archive | Cato Sec where named | Aureon research | Admitted only per named tool |
+| Treasury real yields (TIPS) | U.S. Treasury daily real yield curve XML | U.S. government work | Cato Sec context | Aureon research | Admitted; breakevens are computed nominal minus real |
+| CPI and unemployment | BLS public data API v1 | U.S. government work | Cato Sec context | Aureon research | Admitted; fails closed on any undocumented response |
+| FRED (all series) | FRED API | Terms bar storage and development use (see above) | — | — | Not admitted since v0.6.0; H.4.1, commercial paper and ON RRP volume are declared not served |
 | FINRA short sale, short interest, TRACE | FINRA | Terms limit use and prohibit redistribution without written consent | — | — | Not admitted: license test fails |
 | CME Term SOFR | CME Group | Distribution requires a CME license | — | — | Not admitted: license test fails; `get_term_sofr` is removed |
 | Bloomberg | Bloomberg | Academic access is educational only and excludes development use | — | — | Not admitted: license test fails |
@@ -134,7 +145,6 @@ live requests only and returns one response to the caller. The cancelled
 
 Required notices carried by the affected tool responses and this README:
 
-- **FRED:** “This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.”
 - **New York Fed reference rates:** “The reference rate data are subject to the Terms of Use posted at newyorkfed.org. The New York Fed is not responsible for publication of the reference rate data by Cato Sec, does not sanction or endorse any particular republication, and has no liability for your use.”
 - **CoinGecko:** Price data provided by CoinGecko.
 
@@ -151,12 +161,14 @@ Required notices carried by the affected tool responses and this README:
 
 - `get_macro_regime_snapshot` — Single-call regime: fed funds, SOFR, 10y,
   2y10y, CPI YoY, unemployment.
-- `get_cpi` — Headline and core CPI.
-- `get_fed_balance_sheet` — Total assets, Treasury holdings, MBS, reserve
-  balances.
-- `get_ofr_stress_index` — St. Louis Fed Financial Stress Index (`STLFSI4`, via FRED).
-- `get_ofr_financial_stress_index` — OFR's own daily Financial Stress Index and components;
-  informational and explicitly not substituted into the existing gate.
+- `get_cpi` — Headline and core CPI-U, seasonally adjusted, from BLS.
+- `get_fed_balance_sheet` — Not served since v0.6.0 (its source was FRED); returns a
+  declared absence naming the Federal Reserve Board H.4.1 release.
+- `get_ofr_stress_index` — OFR Financial Stress Index headline series, the gate stress
+  input. Every response carries `threshold_status:
+  PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI`.
+- `get_ofr_financial_stress_index` — OFR's daily Financial Stress Index with its published
+  components, as context.
 
 ### SEC EDGAR
 
@@ -174,7 +186,7 @@ Required notices carried by the affected tool responses and this README:
 - `get_treasury_average_interest_rates` — Treasury Fiscal Data average-interest-rate records.
 
 Data sources, all free and no auth required for core functionality: NY Fed,
-FRED (optional API key for higher rate limits; live and uncached), U.S. Treasury, OFR,
+U.S. Treasury, BLS, OFR,
 SEC EDGAR, Blockscout, Solana RPC, XRPL JSON-RPC (xrplcluster.com with
 s1.ripple.com fallback), CoinGecko.
 
@@ -204,11 +216,6 @@ Add to your `~/.claude.json` under `mcpServers`:
 
 Claude Desktop uses the same JSON shape under `mcpServers` in
 `~/Library/Application Support/Claude/claude_desktop_config.json`.
-
-For higher FRED throughput, add `"env": { "FRED_API_KEY": "<key>" }` to the
-block above. A free key is available at
-https://fred.stlouisfed.org/docs/api/api_key.html. The server runs without
-one at reduced rate limits.
 
 ## Architecture
 
@@ -247,26 +254,27 @@ inputs are equivalent.
 
 **Current compatibility status: INCOMPATIBLE.**
 [`COMPATIBILITY_STATUS.json`](COMPATIBILITY_STATUS.json) is the machine-readable
-source of truth. XRPL decision parity is resolved; the different production
-stress series remains open, so overall production compatibility is not claimed.
+source of truth. XRPL decision parity is resolved. Both sides now read the OFR
+FSI in normal operation; they still differ when that feed is unavailable (below),
+so overall production compatibility is not claimed.
 
 **Current compatibility detail** (verified 23 Oct 2026):
 
 - **XRPL routing (v0.5.0) — resolved.** Both implementations prefer XRPL
   below the shared ultra-low-fee threshold. V17 now passes without a waiver.
 - **Unusable stress reading (v0.3.1) — production inputs still differ.** A NaN,
-  infinite, malformed or missing STLFSI4 observation holds this server's gate.
+  infinite, malformed or missing OFR FSI observation holds this server's gate.
   In aureon the Python implementation is instead handed a finite proxy when its
   source is unavailable, so its usability guard does not see an absent reading.
   The original finding is recorded in
   [br-collab/aureon#12](https://github.com/br-collab/aureon/issues/12).
-- **Stress index (all versions) — inputs diverge in production.** The Node
-  gate reads FRED STLFSI4; the Python twin and the pre-trade policy engine
-  read the OFR Financial Stress Index, or a proxy computed from VIX,
-  high-yield spreads and the yield curve when that feed is unavailable. The
-  golden vectors supply identical inputs to both sides, so parity holds
-  under test; in production the two are fed different series, and the
-  0.5/1.0 thresholds were backtested on STLFSI4 only. Tracked in
+- **Stress index (v0.6.0) — same series in normal operation; thresholds
+  provisional.** The Node gate now reads the OFR Financial Stress Index, as the
+  Python twin and the pre-trade policy engine already did. When the OFR feed is
+  unavailable, this server holds while aureon substitutes a proxy computed from
+  VIX, high-yield spreads and the yield curve, so outage-time inputs still
+  differ. The 0.5/1.0 thresholds were backtested on STLFSI4 only; on the OFR FSI
+  they are provisional policy pending a separate recalibration order. Tracked in
   [br-collab/aureon#11](https://github.com/br-collab/aureon/issues/11).
 - **How it is checked.** `parity/run_parity.py` in
   [br-collab/aureon](https://github.com/br-collab/aureon) drives this

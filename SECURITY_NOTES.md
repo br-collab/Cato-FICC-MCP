@@ -46,7 +46,7 @@ must be true:
   structured JSON, validated against each tool's `inputSchema`. They
   never flow into JSX attribute names because there is no JSX.
 - **Outbound calls:** `axios.get` against a fixed allowlist of public
-  APIs (NY Fed, FRED, TreasuryDirect, OFR, SEC EDGAR, Blockscout
+  APIs (NY Fed, TreasuryDirect, BLS, OFR, SEC EDGAR, Blockscout
   endpoints, Solana RPC, CoinGecko). No response data is rendered
   as HTML.
 
@@ -108,10 +108,10 @@ Cato's attack surface is narrower than a typical Node service because:
 **Classes that DO apply and warrant attention on any future change:**
 
 - **Upstream data poisoning.** If one of the allowlisted APIs is
-  compromised (NY Fed, FRED, etc.), Cato will faithfully relay bad
+  compromised (NY Fed, OFR, etc.), Cato will faithfully relay bad
   numbers to Verana L0. No code-level fix; mitigation is diversity
-  of sources for the same datum (cross-check SOFR from NY Fed vs
-  FRED, for example).
+  of sources for the same datum (cross-check NY Fed repo rates vs
+  the OFR STFM segments, for example).
 - **Prototype pollution via axios response bodies.** Low probability
   (axios parses JSON via `JSON.parse` which is prototype-safe); worth
   re-checking if Cato ever hand-rolls response parsing.
