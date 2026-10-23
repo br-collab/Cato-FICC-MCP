@@ -12,9 +12,9 @@ Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market 
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.4.0. The current research implementation exposes 24 read-only MCP tools and the narrow
+v0.5.0. The current research implementation exposes 29 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
-vectors plus 4 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
+vectors plus 5 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
 or settle a trade; model Value at Risk-based clearing-fund margin, liquidity add-ons, or
 participant-default waterfalls; or erase the two declared Node/Python compatibility gaps.
@@ -31,12 +31,12 @@ and pre-trade control.
 
 ## What This Server Exposes
 
-24 tools, all read-only — no tool can initiate, route, or release a trade.
+29 tools, all read-only — no tool can initiate, route, or release a trade.
 
 ### Public API
 
 The supported external interface is the `cato_sec` stdio executable and the
-24 MCP tools listed below. Install the package and start it with `cato_sec`,
+29 MCP tools listed below. Install the package and start it with `cato_sec`,
 `npm start`, or `node index.js`; MCP clients should discover and call tools
 through the protocol rather than import implementation functions from
 `index.js`. Executing `index.js` starts the server; requiring it is side-effect
@@ -100,7 +100,6 @@ are implementation details and may change without forming a package-level API.
 - `get_repo_reference_rates` — SOFR, BGCR, TGCR.
 - `get_effr` — Effective Federal Funds Rate.
 - `get_repo_operations` — Fed open market repo and reverse repo operations.
-- `get_term_sofr` — CME Term SOFR 1m / 3m / 6m / 12m via FRED.
 - `get_money_market_rates` — Commercial paper, banker acceptances, CDs.
 - `get_cleared_repo_segments` — OFR STFM FICC DVP, FICC GCF, and tri-party
   preliminary average rates and transaction volumes with series IDs and dates.
@@ -110,14 +109,34 @@ are implementation details and may change without forming a package-level API.
 
 ### Sections and admission
 
-Cato remains one server organised into Treasury and rates, repo, money markets
-and macro, and digital-assets sections. A section is admitted only when its data
-is free to redistribute, a doctrine gate exists for that rail so tools return
-gate evidence rather than prices alone, and a named domain or agent consumes it.
-Treasury/rates, repo, and money-markets/macro pass through Cato Sec/Cato Cash and
-their Atreides/Aureon consumers; digital assets pass through the atomic-settlement
-gate and Aureon. Equities, listed options, and foreign exchange are not admitted
-because the required operational data is licensed rather than freely redistributable.
+A section is admitted only when all three tests pass: the data may be redistributed,
+a governance gate exists, and a named consumer exists. “Publicly visible” is not a
+license. Cato does not store, cache, archive, or republish FRED API content; it makes
+live requests only and returns one response to the caller. The cancelled
+`fred_historical_ingest`/ArcticDB plan is not part of this server.
+
+| Section | Source | License basis | Gate | Named consumer | Status |
+|---|---|---|---|---|---|
+| Treasury rates and auctions | U.S. Treasury XML and Fiscal Data | U.S. government works; public APIs | Cato Sec | Aureon and Atreides | Admitted |
+| NY Fed reference rates | NY Fed Markets API | NY Fed Terms of Use permit use, copying and distribution with the required notice | Cato Sec | Aureon and Atreides | Admitted |
+| Repo | OFR STFM API | OFR calls it an open public interface requiring no token or registration | Cato Sec / Cato Cash | Aureon and Atreides | Admitted |
+| OFR Financial Stress Index | OFR daily publication | U.S. government work, subject to OFR's third-party-data disclaimer | Informational only; the existing gate continues to use STLFSI4 | Aureon research | Admitted as context, not a gate input |
+| SEC fails to deliver | SEC twice-monthly files | U.S. government work | Atreides Rule 204 controls | Atreides CNS fails checks | Admitted as market context |
+| Party identity | GLEIF API | CC0 1.0 via the required API Access Service | Account-master identity controls | Attested crossings and account master | Admitted |
+| Instrument identity | OpenFIGI API | FIGI identifiers dedicated to the public domain; no CUSIP database is stored or published | Fixture admission controls | OMS-1 / EQ-1 fixtures | Admitted |
+| Sanctions | Treasury OFAC Sanctions List Service | U.S. government work | Account-master sanctions control | Account master | Admitted as exact-name advisory screening |
+| Digital assets | CoinGecko public API and public rail RPCs | Public API use with attribution; no redistribution claim beyond the live response | Atomic-settlement gate | Aureon | Admitted |
+| FRED residual series | FRED API, only when FRED owns the series or no primary feed is admitted | Live pass-through under FRED API terms; no cache/archive | Cato Sec where named | Aureon research | Admitted only per named tool |
+| FINRA short sale, short interest, TRACE | FINRA | Terms limit use and prohibit redistribution without written consent | — | — | Not admitted: license test fails |
+| CME Term SOFR | CME Group | Distribution requires a CME license | — | — | Not admitted: license test fails; `get_term_sofr` is removed |
+| Bloomberg | Bloomberg | Academic access is educational only and excludes development use | — | — | Not admitted: license test fails |
+| Nasdaq / NYSE Reg SHO threshold lists | Exchange publications | Redistribution permission has not been confirmed | — | — | Not admitted: license test is indeterminate |
+
+Required notices carried by the affected tool responses and this README:
+
+- **FRED:** “This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.”
+- **New York Fed reference rates:** “The reference rate data are subject to the Terms of Use posted at newyorkfed.org. The New York Fed is not responsible for publication of the reference rate data by Cato Sec, does not sanction or endorse any particular republication, and has no liability for your use.”
+- **CoinGecko:** Price data provided by CoinGecko.
 
 ### Treasury Curve
 
@@ -136,14 +155,26 @@ because the required operational data is licensed rather than freely redistribut
 - `get_fed_balance_sheet` — Total assets, Treasury holdings, MBS, reserve
   balances.
 - `get_ofr_stress_index` — St. Louis Fed Financial Stress Index (`STLFSI4`, via FRED).
+- `get_ofr_financial_stress_index` — OFR's own daily Financial Stress Index and components;
+  informational and explicitly not substituted into the existing gate.
 
 ### SEC EDGAR
 
 - `get_recent_13f_filers` — Recent institutional holdings filings.
 - `get_company_filings` — Company-specific filings by CIK.
+- `get_sec_fails_to_deliver` — SEC twice-monthly CNS balance by CUSIP. The value is
+  an outstanding aggregate balance, not a count of new fails.
+
+### Identity, sanctions, and fiscal data
+
+- `lookup_lei` — GLEIF LEI API lookup through the Access Service.
+- `map_cusip_to_figi` — OpenFIGI mapping without creating or publishing a CUSIP database.
+- `screen_ofac_sdn` — Exact-name advisory check of OFAC's live SDN CSV; a non-match is
+  not sanctions clearance and source failure returns unavailable.
+- `get_treasury_average_interest_rates` — Treasury Fiscal Data average-interest-rate records.
 
 Data sources, all free and no auth required for core functionality: NY Fed,
-FRED (optional API key for higher rate limits), TreasuryDirect, OFR,
+FRED (optional API key for higher rate limits; live and uncached), U.S. Treasury, OFR,
 SEC EDGAR, Blockscout, Solana RPC, XRPL JSON-RPC (xrplcluster.com with
 s1.ripple.com fallback), CoinGecko.
 
