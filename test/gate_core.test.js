@@ -21,7 +21,7 @@
  */
 
 const assert = require("assert");
-const { computeGateDecision, pickRecommendedChain, stressReadingFromObservation } = require("../gate_core.js");
+const { ADVISORY_NOTICE, computeGateDecision, eligibleRails, pickRecommendedChain, stressReadingFromObservation } = require("../gate_core.js");
 
 const VECTORS = [
   { id: "all_clear", ofr_stress: 0.20, gas_gwei: 20.0, sofr_delta_bps: 2.0, expect: { gate_decision: "PROCEED", recommended_rail: "atomic" } },
@@ -106,9 +106,29 @@ try {
   console.error(`FAIL  pick_recommended_chain_solana: ${err.message} (got ${chain})`);
 }
 
+// Rule under test — ORDER-GR-1 finding 1: "eligibility before cost. A rail
+// is a candidate only if the instrument exists on it and the firm's declared
+// memberships and legal entitlements allow it."
+const ELIGIBILITY = [
+  { id: "treasury_direct_member", input: { instrument_type: "cusip_treasury", ficc_member: true, fedwire_entitled: true, chain_entitlements: ["xrpl"] }, expect: ["ficc_traditional", "fedwire_securities"] },
+  { id: "treasury_no_chain", input: { instrument_type: "cusip_treasury", chain_entitlements: ["ethereum_l1", "xrpl"] }, expect: [] },
+  { id: "tokenized_declared_only", input: { instrument_type: "tokenized_fund", ficc_member: true, chain_entitlements: ["base", "xrpl"] }, expect: ["base", "xrpl"] },
+  { id: "unknown_instrument", input: { instrument_type: "corporate_bond", ficc_member: true }, expect: [] },
+];
+for (const v of ELIGIBILITY) {
+  try {
+    assert.deepStrictEqual(eligibleRails(v.input), v.expect, v.id);
+    console.log(`PASS  ${v.id}`);
+  } catch (err) {
+    failures++;
+    console.error(`FAIL  ${v.id}: ${err.message}`);
+  }
+}
+assert.strictEqual(ADVISORY_NOTICE, "ADVISORY, NOT A CLEARANCE DECISION");
+
 console.log("-".repeat(60));
 if (failures) {
   console.error(`${failures} vector(s) failed.`);
   process.exit(1);
 }
-console.log(`${VECTORS.length + INGEST.length + 1} vector(s) passed.`);
+console.log(`${VECTORS.length + INGEST.length + ELIGIBILITY.length + 1} vector(s) passed.`);

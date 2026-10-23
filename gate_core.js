@@ -39,6 +39,24 @@ const CATO_ULTRA_LOW_FEE_USD = 0.01;
 // the hard HOLD_THRESHOLD, and it must have the same one home every
 // other doctrine constant does.
 const CATO_POSTURE_MONITOR_GAS = 30.0;
+const ADVISORY_NOTICE = "ADVISORY, NOT A CLEARANCE DECISION";
+
+/**
+ * GR-1 governing rule (ORDER-GR-1, finding 1):
+ * "eligibility before cost. A rail is a candidate only if the instrument
+ * exists on it and the firm's declared memberships and legal entitlements
+ * allow it. Cost ranks only among eligible rails."
+ */
+function eligibleRails({ instrument_type, ficc_member = false, fedwire_entitled = false, chain_entitlements = [] }) {
+  const chains = new Set(Array.isArray(chain_entitlements) ? chain_entitlements : []);
+  if (instrument_type === "cusip_treasury") {
+    return [...(ficc_member ? ["ficc_traditional"] : []), ...(fedwire_entitled ? ["fedwire_securities"] : [])];
+  }
+  if (instrument_type === "tokenized_fund") {
+    return ["ethereum_l1", "base", "arbitrum", "solana", "xrpl"].filter((rail) => chains.has(rail));
+  }
+  return [];
+}
 
 /**
  * True only for a real, finite number — the one shape a systemic-stress
@@ -166,6 +184,8 @@ module.exports = {
   CATO_SOFR_DELTA_HOLD_BPS,
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
+  ADVISORY_NOTICE,
+  eligibleRails,
   isUsableStressReading,
   stressReadingFromObservation,
   computeGateDecision,

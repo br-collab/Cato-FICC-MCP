@@ -26,9 +26,14 @@ assert.strictEqual(
   "open decision or production-input differences cannot be labelled compatible"
 );
 
-for (const id of ["xrpl-routing", "production-stress-series"]) {
-  assert.ok(open.some((difference) => difference.id === id), `missing declared gap: ${id}`);
-}
+assert.ok(
+  open.some((difference) => difference.id === "production-stress-series"),
+  "missing declared production-input gap"
+);
+assert.ok(
+  status.differences.some((difference) => difference.id === "xrpl-routing" && difference.resolved),
+  "XRPL parity must remain recorded as resolved"
+);
 
 assert.ok(readme.includes("COMPATIBILITY_STATUS.json"), "README must link the status record");
 assert.ok(

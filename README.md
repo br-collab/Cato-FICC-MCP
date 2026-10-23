@@ -241,25 +241,19 @@ doctrine emitted here (`PROCEED` / `HOLD` / `ESCALATE`, plus a
 `recommended_chain`) is advisory input to a human authority gate (CAOM-001),
 not an execution path. Related decision logic is implemented independently
 here in JavaScript and inside Aureon in Python
-(`aureon/mcp/cato_client.py`). Identical decisions for identical inputs are a
-compatibility target, not a current property. The audit compares golden vectors
-and detects undeclared drift; it does not prove that production inputs or all
-outputs are equivalent.
+(`aureon/mcp/cato_client.py`). The full executable vector set produces identical
+decisions. The audit detects decision drift; it does not prove that production
+inputs are equivalent.
 
 **Current compatibility status: INCOMPATIBLE.**
 [`COMPATIBILITY_STATUS.json`](COMPATIBILITY_STATUS.json) is the machine-readable
-source of truth. It records the open XRPL decision-output difference and the
-different production stress series. A CI test fails if the published claim is
-made greener while either difference remains unresolved.
+source of truth. XRPL decision parity is resolved; the different production
+stress series remains open, so overall production compatibility is not claimed.
 
-**Current compatibility detail** (verified 22 Sep 2026):
+**Current compatibility detail** (verified 23 Oct 2026):
 
-- **XRPL routing (v0.3.0) — diverges.** This server's chain picker prefers
-  XRPL when its fee is under $0.01; the Python twin has no XRPL branch. On the
-  same chain state (XRPL fee $0.00003, Solana $0.0004, Base 0.01 gwei,
-  Ethereum 0.5 gwei) this server recommends `xrpl` and the twin recommends
-  `solana`. The mirror spec is `PARITY_XRPL.md`; it has not landed. Tracked in
-  [br-collab/aureon#9](https://github.com/br-collab/aureon/issues/9).
+- **XRPL routing (v0.5.0) — resolved.** Both implementations prefer XRPL
+  below the shared ultra-low-fee threshold. V17 now passes without a waiver.
 - **Unusable stress reading (v0.3.1) — production inputs still differ.** A NaN,
   infinite, malformed or missing STLFSI4 observation holds this server's gate.
   In aureon the Python implementation is instead handed a finite proxy when its
@@ -276,10 +270,8 @@ made greener while either difference remains unresolved.
   [br-collab/aureon#11](https://github.com/br-collab/aureon/issues/11).
 - **How it is checked.** `parity/run_parity.py` in
   [br-collab/aureon](https://github.com/br-collab/aureon) drives this
-  repository's `gate_core.js` against the twin on 17 golden vectors. Sixteen
-  pass. The seventeenth, V17, reproduces the XRPL divergence above and is
-  marked KNOWN-FAILING: it is reported on every run, and the build fails if it
-  starts passing before its marker is removed. The harness runs in CI in both
+  repository's `gate_core.js` against the twin on 17 golden vectors. All 17
+  pass, and CI fails on any decision difference. The harness runs in CI in both
   repositories (`.github/workflows/parity.yml`), added in
   [`63addba`](https://github.com/br-collab/Cato-FICC-MCP/commit/63addba7361e30c20d9efab968ae5000a1b81785) here and
   [`810b9b3`](https://github.com/br-collab/aureon/commit/810b9b3459f4f79621b6a3d13b8190939069befe) in aureon. It covers only what the vectors
@@ -287,21 +279,18 @@ made greener while either difference remains unresolved.
 
 ## Routing Doctrine
 
-Settlement-rail routing is deterministic and parameterized by observable
-market-state indicators. The router does not learn, adapt, or improvise — it
-applies declared rules against current state and produces a routing
-recommendation that a human approves before any settlement instruction is
-generated.
+Settlement-rail advice applies eligibility before cost. A CUSIP Treasury can
+be considered only for the firm's declared FICC/Fedwire entitlements; it is
+never compared with a tokenized claim on a chain. A tokenized fund is ranked
+only across declared chain entitlements. Every comparison is **ADVISORY, NOT A
+CLEARANCE DECISION** and cannot create a settlement instruction.
 
 ```
-if      St. Louis Fed stress > 0.5               → ficc_traditional   (stress overrides everything)
-else if |SOFR 1-day delta| > 10 bps              → ficc_traditional   (funding-market shock override)
-else if notional > $10M  and  eth_gas < 30 gwei  → ethereum_l1        (large notional, gas is noise)
-else if xrpl_fee_usd < $0.01                     → xrpl               (ultra-low cost + deterministic ~4s finality)
-else if solana_fee_usd < $0.01                   → solana             (ultra-low cost, probabilistic-speed tier)
-else if base_gas < 1 gwei                        → base               (L2 default when available)
-else if eth_gas > 50 gwei                        → ficc_traditional   (gas spike fallback)
-else                                             → ethereum_l1        (safe default)
+eligible = instrument-exists-on-rail AND declared-membership-or-entitlement
+if eligible is empty                              → no recommendation
+if CUSIP Treasury                                 → FICC/Fedwire only; never a chain
+if tokenized fund                                 → declared chain entitlements only
+rank cost only inside eligible
 ```
 
 **v0.3.0 doctrine event — why XRPL outranks Solana.** At equal near-zero
@@ -316,14 +305,13 @@ consensus stall, Feb 4-5, 2025, no loss of user assets) is disclosed in
 `xrpl_note` — the preference is earned on the merits, not granted by
 exemption. Per the parity principle, this doctrine change requires a
 mirrored change to the Python twin (`aureon/mcp/cato_client.py`), specified
-in `PARITY_XRPL.md`. **That mirror has not landed** — the twin diverges at
-this step of the chain picker; see *Current parity status* under Architecture.
+in `PARITY_XRPL.md`. That mirror is implemented by aureon GR-1 and V17 passes.
 
 ### Settlement Rails
 
 | Rail | Speed | Cost | Status |
 |------|-------|------|--------|
-| **FICC traditional** | T+1 | ~0.5 bps clearing fee net of 40% netting benefit + SOFR cost-of-capital | Live |
+| **FICC traditional** | T+1 | Illustrative 0.5 bps/40% proxy plus SOFR cost-of-capital | Live for declared members |
 | **Ethereum L1** | ~12s | Variable gwei, fetched from `eth.blockscout.com` | Live |
 | **Base** (Ethereum L2) | ~2s | ~0.01 gwei, fetched from `base.blockscout.com` | Live |
 | **Arbitrum** (Ethereum L2) | ~2s | ~0.02 gwei, fetched from `arbitrum.blockscout.com` | Live |
