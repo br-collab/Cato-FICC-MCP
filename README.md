@@ -14,7 +14,7 @@ and on-chain settlement tooling to AI development workflows.
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
 v0.4.0. The current research implementation exposes 24 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
-vectors plus 3 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
+vectors plus 4 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
 or settle a trade; model Value at Risk-based clearing-fund margin, liquidity add-ons, or
 participant-default waterfalls; or erase the two declared Node/Python compatibility gaps.
@@ -72,7 +72,7 @@ are implementation details and may change without forming a package-level API.
 > repository is `cato_sec`; `get_atomic_settlement_gate` composes it with rail
 > state. `CATO-F`,
 > in [br-collab/Project-Atreides](https://github.com/br-collab/Project-Atreides)
-> (`atreides/rails/cato_f.py`), is a separate in-process gate for the **cash**
+> (`atreides/rails/cato_cash.py`), is a separate in-process gate for the **cash**
 > settlement rail; it emits `PROCEED` / `HOLD` / `ESCALATE` with a rail and a
 > finality class. The components are designed as counterparts and share the same OFR
 > STLFSI4 stress thresholds, but they are different components answering
