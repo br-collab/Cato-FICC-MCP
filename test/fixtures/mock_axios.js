@@ -24,7 +24,7 @@ axios.get = async (url, opts = {}) => {
   if (url.includes("interest-rates/pages/xml")) {
     return { data: params.data === "daily_treasury_real_yield_curve" ? REAL_XML : NOMINAL_XML };
   }
-  if (url.includes("api.bls.gov")) return { data: BLS };
+  if (new URL(url).hostname === "api.bls.gov") return { data: BLS };
   if (url.includes("newyorkfed.org/api/rates")) {
     return { data: { refRates: [{ effectiveDate: "2026-10-22", percentRate: 4.30 }, { effectiveDate: "2026-10-21", percentRate: 4.29 }] } };
   }
