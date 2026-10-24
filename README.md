@@ -7,12 +7,14 @@
 > *experimental*, *validated* and *production-qualified*; all five repositories are at
 > the first, and this label changes only when evidence changes it.
 
+**Last updated:** 242250Z OCT 26. Reflects `main` at `a1ece40`, package version 0.6.0 (latest release tag `v0.4.0`). Latest merged change: #36, CLOSE-1 WP1, FRED removed and the gate stress input moved to the OFR Financial Stress Index.
+
 
 Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.5.0. The current research implementation exposes 29 read-only MCP tools and the narrow
+v0.6.0. The current research implementation exposes 29 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
 vectors plus 5 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
