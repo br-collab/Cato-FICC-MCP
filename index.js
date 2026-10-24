@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cato Sec MCP Server — v0.5.0
+ * Cato Sec MCP Server — v0.6.0
  * Read-only advisory data layer for tokenized settlement governance.
  * Multi-chain market data server with live CoinGecko price feeds.
  * v0.3.0 adds the XRPL settlement rail: live fee state via the XRPL
@@ -25,7 +25,7 @@
  *
  * Data sources (all free, no auth required):
  *   - NY Fed:        SOFR, BGCR, TGCR, EFFR, repo reference rates
- *   - FRED:          Data without an admitted primary replacement; live, uncached
+ *   - BLS:           CPI and unemployment from the Bureau of Labor Statistics public API
  *   - U.S. Treasury: Auctions, yield curves, fiscal data, OFAC SDN
  *   - OFR:           Financial stress index, systemic risk indicators
  *   - SEC EDGAR:     13F filings, institutional positioning
@@ -44,7 +44,6 @@ const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontext
 const axios = require("axios");
 const AdmZip = require("adm-zip");
 
-const FRED_BASE = "https://api.stlouisfed.org/fred";
 const NYFED_BASE = "https://markets.newyorkfed.org/api";
 const TREASURY_BASE = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2";
 const EDGAR_BASE = "https://data.sec.gov";
@@ -53,14 +52,18 @@ const OFR_FSI_CSV = "https://www.financialresearch.gov/financial-stress-index/da
 const GLEIF_BASE = "https://api.gleif.org/api/v1";
 const OPENFIGI_BASE = "https://api.openfigi.com/v3";
 const OFAC_SDN_CSV = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV";
-const FRED_NOTICE = "This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.";
+const BLS_BASE = "https://api.bls.gov/publicAPI/v1/timeseries/data";
+// CLOSE-1 decision D1 (Bill, 23 Oct 2026): the stress gate reads the OFR FSI. The 0.5 and 1.0
+// thresholds were backtested on STLFSI4 only; on the OFR FSI they are provisional policy.
+const STRESS_SERIES = "OFR Financial Stress Index (OFR FSI)";
 const NYFED_NOTICE = "The reference rate data are subject to the Terms of Use posted at newyorkfed.org. The New York Fed is not responsible for publication of the reference rate data by Cato Sec, does not sanction or endorse any particular republication, and has no liability for your use.";
 const COINGECKO_NOTICE = "Price data provided by CoinGecko.";
 
-// CATO-D2 governing rule (ORDER-CATO-D2, scope 2): "Keep FRED only where it
-// is the publisher's own series or no primary feed exists ... live, uncached,
-// with the FRED notice." Source clients below return one response and never
-// write FRED content to a file, database, or process-level cache.
+// CLOSE-1 WP1 (CATO-D2 Annex A v0.2): FRED Services Terms of Use prohibit storing,
+// caching or archiving FRED content and using it in connection with the
+// development of any software program or system. Cato therefore calls no FRED
+// endpoint. Every series is read from its primary publisher, or the tool states
+// that it is not served and names the primary publication.
 
 // ── Multi-chain settlement rails (Blockscout + Solana RPC) ───────────────────
 // Each entry is a free public endpoint. Solana is different protocol so it
@@ -130,6 +133,7 @@ const {
   CATO_ULTRA_LOW_FEE_USD,
   CATO_POSTURE_MONITOR_GAS,
   ADVISORY_NOTICE,
+  STRESS_THRESHOLD_STATUS,
   eligibleRails,
   isUsableStressReading,
   stressReadingFromObservation,
@@ -147,12 +151,10 @@ const CHAIN_SPEED = {
   xrpl:     "4s",     // ledger close ~3-5s; DETERMINISTIC finality on validation
 };
 
-const FRED_KEY = process.env.FRED_API_KEY || ""; // Free key from fred.stlouisfed.org
-
 async function get(url, params = {}, timeout = 10000) {
   try {
     const res = await axios.get(url, { params, timeout,
-      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.6.0 (open-source; Project Aureon; contact: github)" }
     });
     return res.data;
   } catch (e) {
@@ -163,7 +165,7 @@ async function get(url, params = {}, timeout = 10000) {
 async function getBinary(url) {
   try {
     const res = await axios.get(url, { responseType: "arraybuffer", timeout: 15000,
-      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.6.0 (open-source; Project Aureon; contact: github)" }
     });
     return Buffer.from(res.data);
   } catch (e) {
@@ -174,7 +176,7 @@ async function getBinary(url) {
 async function post(url, body) {
   try {
     const res = await axios.post(url, body, { timeout: 10000,
-      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon; contact: github)" }
+      headers: { "User-Agent": "Cato-Sec-MCP-Server/0.6.0 (open-source; Project Aureon; contact: github)" }
     });
     return res.data;
   } catch (e) {
@@ -279,16 +281,68 @@ async function getLivePrices() {
   }
 }
 
-// ── FRED helper ──────────────────────────────────────────────────────────────
-async function fredSeries(seriesId, limit = 10) {
-  const params = { series_id: seriesId, sort_order: "desc", limit, file_type: "json" };
-  if (FRED_KEY) params.api_key = FRED_KEY;
-  const data = await get(`${FRED_BASE}/series/observations`, params);
+// ── OFR FSI helper (gate stress input) ──────────────────────────────────────
+// Reads the OFR's own daily publication and returns the newest observations
+// first, in the same {date, value} shape the gate core already consumes. A
+// failed or malformed publication returns an error and no observation, so the
+// gate holds (gate_core.isUsableStressReading).
+async function ofrFsiSeries(limit = 1) {
+  const csv = await get(OFR_FSI_CSV);
+  if (csv?.error || typeof csv !== "string") return { error: csv?.error || "OFR FSI publication unavailable", observations: [] };
+  const lines = csv.trim().split(/\r?\n/);
+  const headers = parseCsvLine(lines[0]);
+  if (headers[0] !== "Date" || headers[1] !== "OFR FSI") return { error: "OFR FSI schema did not match the published form", observations: [] };
+  const rows = lines.slice(1).filter(Boolean).map(parseCsvLine).filter((values) => values[0]);
+  const observations = rows.slice(-Math.max(1, limit)).reverse().map((values) => ({ date: values[0], value: values[1] }));
+  return { series: "OFR FSI", source: "Office of Financial Research Financial Stress Index", source_url: OFR_FSI_CSV, observations };
+}
+
+// ── BLS helper (CPI, unemployment) ──────────────────────────────────────────
+// Bureau of Labor Statistics public API, version 1 (no registration key).
+// Fails closed: any response that is not the documented shape is unavailable.
+async function blsSeries(seriesId, limit = 12) {
+  const data = await get(`${BLS_BASE}/${seriesId}`);
+  const series = data?.Results?.series?.[0];
+  if (data?.error || data?.status !== "REQUEST_SUCCEEDED" || !Array.isArray(series?.data)) {
+    return { error: data?.error || `BLS series ${seriesId} unavailable or not in the documented form`, unavailable: true, observations: [] };
+  }
+  const observations = series.data
+    .filter((row) => /^M(0[1-9]|1[0-2])$/.test(row.period))
+    .slice(0, limit)
+    .map((row) => ({ date: `${row.year}-${row.period.slice(1)}`, value: row.value }));
+  return { series: seriesId, source: "U.S. Bureau of Labor Statistics public data API", observations };
+}
+
+// ── Treasury real yield curve (TIPS) ────────────────────────────────────────
+async function treasuryRealYieldCurve(days = 5) {
+  const year = new Date().getUTCFullYear();
+  const data = await get(
+    "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+    { data: "daily_treasury_real_yield_curve", field_tdr_date_value: year },
+    30000,
+  );
   if (data.error) return data;
+  const xml = typeof data === "string" ? data : String(data);
+  const entries = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(-days).reverse();
+  const field = (entry, name) => entry.match(new RegExp(`<d:${name}[^>]*>([^<]*)<\\/d:${name}>`))?.[1] ?? null;
+  const tenors = { "5y": "TC_5YEAR", "7y": "TC_7YEAR", "10y": "TC_10YEAR", "20y": "TC_20YEAR", "30y": "TC_30YEAR" };
+  const observations = entries.map((match) => ({
+    date: field(match[1], "NEW_DATE")?.slice(0, 10) ?? null,
+    yields: Object.fromEntries(Object.entries(tenors).map(([tenor, name]) => [tenor, field(match[1], name)])),
+  }));
+  if (!observations.length) return { error: "Treasury real yield feed returned no parseable observations" };
+  return { source: "U.S. Department of the Treasury daily real yield curve XML feed", observations };
+}
+
+// A tool whose former source was FRED and whose primary publication has no
+// admitted parser yet. It states that and names the primary source; it never
+// substitutes a value.
+function notServed(what, primary) {
   return {
-    series: seriesId,
-    source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`,
-    observations: (data.observations || []).map(o => ({ date: o.date, value: o.value }))
+    unavailable: true,
+    not_served: what,
+    reason: "Removed under CLOSE-1 WP1: Cato no longer calls FRED, and the primary publication is not yet admitted with a verified parser.",
+    primary_source: primary,
   };
 }
 
@@ -378,7 +432,7 @@ async function solanaStats(solPrice) {
       SOLANA_RPC,
       { jsonrpc: "2.0", id: 1, method: "getRecentPrioritizationFees", params: [] },
       { timeout: 5000, headers: { "Content-Type": "application/json",
-          "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon)" } }
+          "User-Agent": "Cato-Sec-MCP-Server/0.6.0 (open-source; Project Aureon)" } }
     );
     const fees = res.data?.result || [];
     const priorityMedian = fees.length > 0
@@ -425,7 +479,7 @@ async function xrplStats(xrpPrice) {
         endpoint,
         { method: "fee", params: [{}] },
         { timeout: 5000, headers: { "Content-Type": "application/json",
-            "User-Agent": "Cato-Sec-MCP-Server/0.5.0 (open-source; Project Aureon)" } }
+            "User-Agent": "Cato-Sec-MCP-Server/0.6.0 (open-source; Project Aureon)" } }
       );
       const drops = res.data?.result?.drops;
       if (!drops) continue;   // malformed response — try next endpoint
@@ -645,14 +699,14 @@ const TOOLS = [
   // ── OFR / MONEY MARKETS ───────────────────────────────────────────────────
   {
     name: "get_ofr_stress_index",
-    description: "St. Louis Fed Financial Stress Index (FRED STLFSI4). Verana L0 systemic stress overlay for doctrine gate decisions.",
+    description: "OFR Financial Stress Index (OFR FSI), the gate stress input. Gate thresholds 0.5 and 1.0 are PROVISIONAL_POLICY_NOT_BACKTESTED_ON_OFR_FSI.",
     inputSchema: { type: "object", properties: {
       days: { type: "number", default: 30 }
     }}
   },
   {
     name: "get_ofr_financial_stress_index",
-    description: "OFR Financial Stress Index and published components from the Office of Financial Research's daily CSV. Informational only; not the STLFSI4 gate input.",
+    description: "OFR Financial Stress Index and published components from the Office of Financial Research's daily CSV. Context view; the gate reads the headline OFR FSI through get_ofr_stress_index.",
     inputSchema: { type: "object", properties: { days: { type: "number", default: 30 } } }
   },
   {
@@ -737,7 +791,7 @@ const TOOLS = [
   },
   {
     name: "get_tokenized_settlement_context",
-    description: "Read-only advisory signal on current on-chain settlement conditions. Combines Blockscout ETH gas price with New York Fed SOFR and the declared STLFSI4 stress input. Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50). Does not initiate, route, or settle any trade.",
+    description: "Read-only advisory signal on current on-chain settlement conditions. Combines Blockscout ETH gas price with New York Fed SOFR and the OFR FSI stress input (provisional thresholds). Returns settlement_posture of 'favorable' (stress < 0.5 AND gas < 30), 'monitor' (stress 0.5-1.0 OR gas 30-50), or 'elevated' (stress > 1.0 OR gas > 50). Does not initiate, route, or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -761,7 +815,7 @@ const TOOLS = [
   // ── GOVERNANCE ────────────────────────────────────────────────────────────
   {
     name: "cato_sec",
-    description: "Read-only advisory pre-trade check — consolidated eFICC governance context: SOFR, Treasury curve, St. Louis Fed Financial Stress Index, and Fed liquidity posture. Does not execute, route, or settle any trade.",
+    description: "Read-only advisory pre-trade check — consolidated eFICC governance context: SOFR, Treasury curve, OFR Financial Stress Index (provisional thresholds), and Fed liquidity posture. Does not execute, route, or settle any trade.",
     inputSchema: { type: "object", properties: {} }
   }
 ];
@@ -818,21 +872,22 @@ async function handleTool(name, args) {
 
     case "get_tips_yields": {
       const tenor = args.tenor || "all";
-      const SERIES = { "5y": "DFII5", "10y": "DFII10", "20y": "DFII20", "30y": "DFII30" };
-      const BREAKEVEN = { "5y": "T5YIE", "10y": "T10YIE" };
+      const days = args.days || 10;
+      const [real, nominal] = await Promise.all([treasuryRealYieldCurve(days), treasuryYieldCurve(days)]);
+      if (real.error) return { error: real.error, unavailable: true };
+      const nominalByDate = new Map((nominal.observations || []).map((row) => [row.date, row.yields]));
+      const tenors = tenor === "all" ? ["5y", "10y", "20y", "30y"] : [tenor];
+      const latest = real.observations[0];
       const results = {};
-      const tenors = tenor === "all" ? Object.keys(SERIES) : [tenor];
       for (const t of tenors) {
-        if (SERIES[t]) {
-          const d = await fredSeries(SERIES[t], args.days || 10);
-          results[`${t}_real_yield`] = d.observations?.[0];
-        }
-        if (BREAKEVEN[t]) {
-          const d = await fredSeries(BREAKEVEN[t], args.days || 10);
-          results[`${t}_breakeven`] = d.observations?.[0];
-        }
+        results[`${t}_real_yield`] = { date: latest.date, value: latest.yields[t] };
+        const nominalValue = parseFloat(nominalByDate.get(latest.date)?.[t]);
+        const realValue = parseFloat(latest.yields[t]);
+        results[`${t}_breakeven`] = Number.isFinite(nominalValue) && Number.isFinite(realValue)
+          ? { date: latest.date, value: (nominalValue - realValue).toFixed(2), method: "nominal par yield minus real par yield, same tenor and date, both from Treasury" }
+          : { date: latest.date, value: null, reason: "nominal or real par yield missing for this date" };
       }
-      return { source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`, description: "TIPS Real Yields and Breakeven Inflation", data: results };
+      return { source: "U.S. Department of the Treasury daily nominal and real par yield curves", description: "TIPS real yields and computed breakeven inflation", data: results };
     }
 
     case "get_treasury_auctions": {
@@ -876,8 +931,8 @@ async function handleTool(name, args) {
         nyFedRate("effr", 1),
         nyFedRate("sofr", 1),
         treasuryYieldCurve(1),
-        fredSeries("CPIAUCSL", 2),
-        fredSeries("UNRATE", 1)
+        blsSeries("CUSR0000SA0", 2),
+        blsSeries("LNS14000000", 1)
       ]);
       const latestCurve = curve.observations?.[0];
       const t10 = parseFloat(latestCurve?.yields?.["10y"] || 0);
@@ -888,7 +943,7 @@ async function handleTool(name, args) {
         ? (((parseFloat(cpiVals[0].value) - parseFloat(cpiVals[1].value)) / parseFloat(cpiVals[1].value)) * 100 * 12).toFixed(2)
         : "N/A";
       return {
-        source: `NY Fed Markets API + U.S. Treasury XML + FRED macro series. ${NYFED_NOTICE} ${FRED_NOTICE}`,
+        source: `NY Fed Markets API + U.S. Treasury XML + BLS public API. ${NYFED_NOTICE}`,
         snapshot_date: new Date().toISOString().split("T")[0],
         rates: {
           fed_funds_rate: effr.observations?.[0],
@@ -912,38 +967,26 @@ async function handleTool(name, args) {
       const s = args.series || "all";
       const months = args.months || 12;
       const results = {};
-      if (s === "headline" || s === "all") results.headline_cpi = await fredSeries("CPIAUCSL", months);
-      if (s === "core" || s === "all") results.core_cpi = await fredSeries("CPILFESL", months);
-      return { source: `FRED / BLS. ${FRED_NOTICE}`, cpi_data: results };
+      if (s === "headline" || s === "all") results.headline_cpi = await blsSeries("CUSR0000SA0", months);
+      if (s === "core" || s === "all") results.core_cpi = await blsSeries("CUSR0000SA0L1E", months);
+      return { source: "U.S. Bureau of Labor Statistics public data API (CPI-U, seasonally adjusted)", cpi_data: results };
     }
 
     case "get_fed_balance_sheet": {
-      const weeks = args.weeks || 12;
-      const [total, treasuries, mbs, reserves] = await Promise.all([
-        fredSeries("WALCL", weeks),
-        fredSeries("TREAST", weeks),
-        fredSeries("MBST", weeks),
-        fredSeries("WRESBAL", weeks)
-      ]);
-      return {
-        source: `FRED / Federal Reserve H.4.1. ${FRED_NOTICE}`,
-        fed_balance_sheet: {
-          total_assets: total.observations,
-          treasury_securities: treasuries.observations,
-          mbs_holdings: mbs.observations,
-          reserve_balances: reserves.observations
-        }
-      };
+      return notServed("Federal Reserve H.4.1 balance sheet series", "Federal Reserve Board H.4.1 release, https://www.federalreserve.gov/releases/h41/");
     }
 
     case "get_ofr_stress_index": {
-      const data = await fredSeries("STLFSI4", args.days || 30);
+      const data = await ofrFsiSeries(args.days || 30);
+      if (data.error) return { error: data.error, unavailable: true };
       return {
-        source: `Federal Reserve Bank of St. Louis via FRED. ${FRED_NOTICE}`,
-        series_id: "STLFSI4",
-        index_name: "St. Louis Fed Financial Stress Index",
-        description: "Values above 0 indicate above-average financial stress. Verana L0 systemic stress signal.",
-        stress_index: data.observations
+        source: data.source,
+        source_url: data.source_url,
+        series_id: "OFR FSI",
+        index_name: STRESS_SERIES,
+        description: "Values above 0 indicate above-average financial stress. Verana L0 systemic stress signal and gate input.",
+        threshold_status: STRESS_THRESHOLD_STATUS,
+        stress_index: data.observations,
       };
     }
 
@@ -962,19 +1005,7 @@ async function handleTool(name, args) {
     }
 
     case "get_money_market_rates": {
-      const inst = args.instrument || "all";
-      const days = args.days || 10;
-      const SERIES = {
-        "cp_aa_nonfinancial": "DCPN3M",
-        "cp_aa_financial": "DCPF3M",
-        "cp_a2p2": "DCPN30"
-      };
-      const results = {};
-      const insts = inst === "all" ? Object.keys(SERIES) : [inst];
-      for (const i of insts) {
-        if (SERIES[i]) results[i] = await fredSeries(SERIES[i], days);
-      }
-      return { source: `FRED / Federal Reserve. ${FRED_NOTICE}`, money_market_rates: results };
+      return notServed("commercial paper rates", "Federal Reserve Board Commercial Paper release, https://www.federalreserve.gov/releases/cp/");
     }
 
     case "get_repo_market_context": {
@@ -1120,15 +1151,14 @@ async function handleTool(name, args) {
 
     // ── CATO SEC GATE (originally get_ficc_context) ──────────────────────────
     case "cato_sec": {
-      // v0.2.1: fetch live prices, FRED/NY Fed rates+stress, and multichain
+      // v0.6.0: fetch live prices, NY Fed rates, OFR FSI stress, and multichain
       // rail state in parallel so the DSOR context includes a chain
       // recommendation alongside rates + stress.
       const prices = await getLivePrices();
-      const [sofr, curve, stress, rrp, rails] = await Promise.all([
+      const [sofr, curve, stress, rails] = await Promise.all([
         nyFedRate("sofr", 1),
         treasuryYieldCurve(1),
-        fredSeries("STLFSI4", 1),
-        fredSeries("RRPONTSYD", 1),
+        ofrFsiSeries(1),
         multichainGas(prices),
       ]);
       const latestCurve = curve.observations?.[0];
@@ -1153,7 +1183,7 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: `NY Fed Markets API + U.S. Treasury XML + FRED STLFSI4/RRP + Blockscout + Solana RPC. ${NYFED_NOTICE} ${FRED_NOTICE}`,
+        source: `NY Fed Markets API + U.S. Treasury XML + OFR FSI + Blockscout + Solana RPC. ${NYFED_NOTICE}`,
         dsor_context_date: new Date().toISOString(),
         description: "Cato Sec pre-settlement doctrine check — DSOR governance context snapshot (v0.2.0 multi-chain)",
         rates: {
@@ -1169,12 +1199,14 @@ async function handleTool(name, args) {
         },
         systemic_stress: {
           ofr_stress_index: stress.observations?.[0],
+          series: STRESS_SERIES,
+          threshold_status: STRESS_THRESHOLD_STATUS,
           stress_level: !ofrUsable ? "unavailable" :
                         ofrVal > 1 ? "elevated" :
                         ofrVal > 0 ? "above_average" : "normal"
         },
         fed_liquidity: {
-          reverse_repo_facility_volume: rrp.observations?.[0]
+          reverse_repo_facility_volume: notServed("ON RRP facility volume", "New York Fed reverse repo operation results, https://www.newyorkfed.org/markets/desk-operations/reverse-repo"),
         },
         chain_state: rails,
         recommended_chain,
@@ -1228,7 +1260,7 @@ async function handleTool(name, args) {
       const [chain, sofr, stress] = await Promise.all([
         blockscoutStats(),
         nyFedRate("sofr", 1),
-        fredSeries("STLFSI4", 1)
+        ofrFsiSeries(1)
       ]);
       const gas_gwei = chain?.gas_gwei;
       const sofr_rate = parseFloat(sofr.observations?.[0]?.value || "0");
@@ -1254,11 +1286,13 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: `Blockscout + NY Fed SOFR + FRED STLFSI4. ${NYFED_NOTICE} ${FRED_NOTICE}`,
+        source: `Blockscout + NY Fed SOFR + OFR FSI. ${NYFED_NOTICE}`,
         timestamp: new Date().toISOString(),
         gas_gwei,
         sofr_rate,
         ofr_stress,
+        stress_series: STRESS_SERIES,
+        threshold_status: STRESS_THRESHOLD_STATUS,
         stress_reading_usable,
         settlement_posture
       };
@@ -1283,7 +1317,7 @@ async function handleTool(name, args) {
       const prices = await getLivePrices();
       const [sofrSeries, stressSeries, rails] = await Promise.all([
         nyFedRate("sofr", 2),
-        fredSeries("STLFSI4", 1),
+        ofrFsiSeries(1),
         multichainGas(prices),
       ]);
       const sofrObsList = sofrSeries.observations || [];
@@ -1389,7 +1423,7 @@ async function handleTool(name, args) {
       }
 
       return {
-        source: `NY Fed SOFR + FRED STLFSI4 + Blockscout + Solana RPC + XRPL JSON-RPC + CoinGecko. ${NYFED_NOTICE} ${FRED_NOTICE} ${COINGECKO_NOTICE}`,
+        source: `NY Fed SOFR + OFR FSI + Blockscout + Solana RPC + XRPL JSON-RPC + CoinGecko. ${NYFED_NOTICE} ${COINGECKO_NOTICE}`,
         advisory: ADVISORY_NOTICE,
         timestamp: new Date().toISOString(),
         inputs: {
@@ -1403,6 +1437,8 @@ async function handleTool(name, args) {
           sofr_prev_pct: sofrPrev,
           sofr_delta_bps: sofrDeltaBps !== null ? +sofrDeltaBps.toFixed(2) : null,
           ofr_stress,
+          stress_series: STRESS_SERIES,
+          threshold_status: STRESS_THRESHOLD_STATUS,
           stress_reading_usable,
           ethereum_gas_gwei: eth_gas,
           base_gas_gwei: base_gas,
@@ -1447,7 +1483,7 @@ async function handleTool(name, args) {
         nyFedRate("sofr", 2),
       ]);
 
-      // A failed FRED fetch leaves no observation: that is an unusable
+      // A failed OFR FSI fetch leaves no observation: that is an unusable
       // reading and the gate HOLDs. It is not 0 (br-collab/aureon#12).
       const ofr_stress = stressReadingFromObservation(
         gateContext?.systemic_stress?.ofr_stress_index
@@ -1507,6 +1543,8 @@ async function handleTool(name, args) {
           hold_ofr: CATO_OFR_HOLD_THRESHOLD,
           hold_gas_gwei: CATO_GAS_GWEI_HOLD_THRESHOLD,
           hold_sofr_delta_bps: CATO_SOFR_DELTA_HOLD_BPS,
+          stress_series: STRESS_SERIES,
+          stress_threshold_status: STRESS_THRESHOLD_STATUS,
         },
         chain_state: rails,
         price_sources: {
@@ -1557,7 +1595,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write("Cato Sec MCP Server v0.5.0 running — 29 tools across primary public sources and explicitly noticed fallbacks. Read-only advisory data layer; no tool routes or settles a trade.\n");
+  process.stderr.write("Cato Sec MCP Server v0.6.0 running — 29 tools across primary public sources and explicitly noticed fallbacks. Read-only advisory data layer; no tool routes or settles a trade.\n");
 }
 
 if (require.main === module) {

@@ -2,8 +2,8 @@
 "use strict";
 
 // Governing rule: ORDER-CATO-D2 scope 1-3 requires removal of CME Term SOFR,
-// primary public sources for gate inputs, live/uncached residual FRED calls,
-// and the prescribed FRED, NY Fed, and CoinGecko notices.
+// primary public sources for gate inputs, and the prescribed NY Fed and
+// CoinGecko notices. CLOSE-1 WP1 removes FRED entirely (CATO-D2 Annex A v0.2).
 
 const assert = require("assert");
 const fs = require("fs");
@@ -17,7 +17,7 @@ for (const forbidden of ["get_term_sofr", "include_term_sofr", 'fredSeries("SOFR
   assert.ok(!implementation.includes(forbidden), `licensed or non-primary source path returned: ${forbidden}`);
 }
 
-for (const source of ["NYFED_BASE", "treasuryYieldCurve", "OFR_FSI_CSV", "GLEIF_BASE", "OPENFIGI_BASE", "OFAC_SDN_CSV"]) {
+for (const source of ["NYFED_BASE", "treasuryYieldCurve", "treasuryRealYieldCurve", "ofrFsiSeries", "BLS_BASE", "OFR_FSI_CSV", "GLEIF_BASE", "OPENFIGI_BASE", "OFAC_SDN_CSV"]) {
   assert.ok(implementation.includes(source), `missing admitted source: ${source}`);
 }
 
@@ -31,11 +31,9 @@ assert.strictEqual(toolNames.length, 29, "published tool count must match implem
 
 assert.match(implementation, /if \(data\?\.error \|\| !Array\.isArray\(data\?\.data\)\) return \{ error:/, "Treasury failure must be unavailable, not static");
 assert.match(implementation, /if \(csv\?\.error \|\| typeof csv !== "string"\) return \{ error:/, "public CSV failures must be unavailable");
-assert.doesNotMatch(implementation, /writeFile|appendFile|createWriteStream|localStorage|fred_historical_ingest/, "FRED content must not be written or archived");
-assert.doesNotMatch(implementation, /(?:let|const)\s+_[A-Za-z0-9_]*fred[A-Za-z0-9_]*\s*=|(?:let|const)\s+[A-Za-z0-9_]*FRED[A-Za-z0-9_]*CACHE\s*=/, "FRED content must not have a process cache");
+assert.doesNotMatch(implementation, /writeFile|appendFile|createWriteStream|localStorage|fred_historical_ingest/, "source content must not be written or archived");
 
 for (const notice of [
-  "This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.",
   "does not sanction or endorse any particular republication, and has no liability for your use",
   "Price data provided by CoinGecko.",
 ]) {

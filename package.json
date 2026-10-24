@@ -1,6 +1,6 @@
 {
   "name": "cato-sec-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Cato Sec read-only MCP server for license-truthful FICC data and tokenized-settlement governance; no tool routes or settles a trade.",
   "main": "index.js",
   "exports": {
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test/gate_core.test.js && node test/compatibility_claim.test.js && node test/naming.test.js && node test/executable_boundary.test.js && node test/repo_depth.test.js && node test/license_truth.test.js",
+    "test": "node test/gate_core.test.js && node test/compatibility_claim.test.js && node test/naming.test.js && node test/executable_boundary.test.js && node test/repo_depth.test.js && node test/license_truth.test.js && node test/no_fred.test.js && node test/ofr_stress_gate.test.js",
     "test:branch-coverage": "c8 --include=gate_core.js --branches 69 --statements 99 --functions 100 --lines 99 node test/gate_core.test.js"
   },
   "keywords": [

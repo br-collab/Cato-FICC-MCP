@@ -35,7 +35,7 @@ const VECTORS = [
   { id: "gas_missing_clear", ofr_stress: 0.10, gas_gwei: null, sofr_delta_bps: 0.0, expect: { gate_decision: "PROCEED", recommended_rail: "atomic" } },
   { id: "escalate_overrides_gas", ofr_stress: 2.00, gas_gwei: 80.0, sofr_delta_bps: 0.0, expect: { gate_decision: "ESCALATE", recommended_rail: "human_authority" } },
   // 2026-08-21 audit finding: a missing/malformed OFR reading (NaN in
-  // production, via parseFloat(".") on a FRED missing-observation marker)
+  // production, via parseFloat(".") on a missing-observation marker)
   // must never fall through to PROCEED. Each of NaN, +Infinity, null,
   // undefined, and a non-numeric type must HOLD, not PROCEED or ESCALATE.
   { id: "ofr_stress_nan", ofr_stress: NaN, gas_gwei: 20.0, sofr_delta_bps: 0.0, expect: { gate_decision: "HOLD", recommended_rail: "traditional" } },
@@ -69,7 +69,7 @@ for (const v of VECTORS) {
   }
 }
 
-// Ingest: a FRED observation, or its absence, through
+// Ingest: an OFR FSI observation, or its absence, through
 // stressReadingFromObservation and then the decision core. A failed fetch
 // leaves no observation and must HOLD; it used to reach the gate as 0 via
 // `value ?? "0"` and PROCEED (br-collab/aureon#12).
