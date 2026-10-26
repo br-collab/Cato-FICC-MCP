@@ -1,10 +1,11 @@
-# PARITY_XRPL.md — Python-twin mirror for the v0.3.0 xrpl doctrine event
+# PARITY_XRPL.md — XRPL doctrine event closure
 
-Per the Parity Principle (gate_core.js header; Grid 3 CLAUDE.md), any change
-to the decision core is a doctrine event and must be mirrored in the
-in-process Python twin (`aureon/mcp/cato_client.py` in `br-collab/aureon`)
-in the same change set. This note is the mirror spec for v0.3.0. The Node
-side is already live; the twin diverges until these land.
+The former v0.3.0 XRPL divergence is retired by INST-1 WP3/WP4. Cato Sec and
+the Aureon in-process twin both implement doctrine v0.7.0, prefer XRPL below
+the shared ultra-low-fee threshold, refuse malformed rail entries with
+`MALFORMED_RAIL_ENTRY`, and pass the shared vectors for XRPL, Solana, Base,
+Ethereum and no-live-chain outcomes. The historical mirror specification is
+retained below as the record of what was closed; it is no longer an open gap.
 
 ## What changed on the Node side
 
