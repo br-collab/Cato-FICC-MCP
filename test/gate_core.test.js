@@ -21,7 +21,7 @@
  */
 
 const assert = require("assert");
-const { ADVISORY_NOTICE, computeGateDecision, eligibleRails, pickRecommendedChain, stressReadingFromObservation } = require("../gate_core.js");
+const { ADVISORY_NOTICE, CATO_DOCTRINE_VERSION, MALFORMED_RAIL_ENTRY, computeGateDecision, eligibleRails, pickRecommendedChain, pickRecommendedChainResult, stressReadingFromObservation } = require("../gate_core.js");
 
 const VECTORS = [
   { id: "all_clear", ofr_stress: 0.20, gas_gwei: 20.0, sofr_delta_bps: 2.0, expect: { gate_decision: "PROCEED", recommended_rail: "atomic" } },
@@ -105,6 +105,31 @@ try {
   failures++;
   console.error(`FAIL  pick_recommended_chain_solana: ${err.message} (got ${chain})`);
 }
+
+// INST-1 WP3/WP4: "A boolean is never a usable stress reading" and
+// malformed optional readings resolve to the stricter answer on both twins.
+for (const [id, input] of [
+  ["bool_stress", { ofr_stress: true, gas_gwei: 20, sofr_delta_bps: 0 }],
+]) {
+  const result = computeGateDecision(input);
+  assert.strictEqual(result.gate_decision, "HOLD", id);
+}
+
+// INST-1 R-L1 governing rule: "Malformed rail entries return a named
+// refusal on both twins, never an exception."
+const malformedRail = pickRecommendedChainResult({ ethereum: "bad", solana: 1, xrpl: ["x"] });
+assert.strictEqual(malformedRail.recommended_chain, null);
+assert.strictEqual(malformedRail.refusal_code, MALFORMED_RAIL_ENTRY);
+assert.deepStrictEqual(
+  pickRecommendedChainResult({ xrpl: { fee_usd_estimate: "0.001" } }),
+  { recommended_chain: null, refusal_code: MALFORMED_RAIL_ENTRY, rail: "xrpl" },
+);
+assert.deepStrictEqual(
+  pickRecommendedChainResult({ ethereum: { gas_gwei: null } }),
+  { recommended_chain: null, refusal_code: null },
+);
+assert.strictEqual(CATO_DOCTRINE_VERSION, "0.7.0");
+assert.strictEqual(CATO_DOCTRINE_VERSION, require("../package.json").version);
 
 // Rule under test — ORDER-GR-1 finding 1: "eligibility before cost. A rail
 // is a candidate only if the instrument exists on it and the firm's declared

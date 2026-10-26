@@ -1,6 +1,6 @@
 {
   "name": "cato-sec-mcp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Cato Sec read-only MCP server for license-truthful FICC data and tokenized-settlement governance; no tool routes or settles a trade.",
   "main": "index.js",
   "exports": {

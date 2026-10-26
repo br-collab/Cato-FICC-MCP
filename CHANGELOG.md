@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0, 26 Oct 2026
+
+- Closed the Cato/Aureon picker and gate drift across the INST-1 4,000-state
+  corpus, including boolean stress and malformed rail entries.
+- Added a named `MALFORMED_RAIL_ENTRY` refusal and source version constant.
+- Retired the historical XRPL twin-divergence note.
+
 ## 0.6.0, 23 Oct 2026
 
 ### CLOSE-1 WP1: FRED removed (CATO-D2 Annex A v0.2 executed)

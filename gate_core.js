@@ -45,6 +45,9 @@ const CATO_ULTRA_LOW_FEE_USD = 0.01;
 // other doctrine constant does.
 const CATO_POSTURE_MONITOR_GAS = 30.0;
 const ADVISORY_NOTICE = "ADVISORY, NOT A CLEARANCE DECISION";
+const CATO_DOCTRINE_VERSION = "0.7.0";
+const MALFORMED_RAIL_ENTRY = "MALFORMED_RAIL_ENTRY";
+
 
 /**
  * GR-1 governing rule (ORDER-GR-1, finding 1):
@@ -171,10 +174,24 @@ function computeGateDecision({ ofr_stress, gas_gwei, sofr_delta_bps }) {
  */
 function pickRecommendedChain(chainState) {
   const cs = chainState || {};
-  const xrplFee = (cs.xrpl || {}).fee_usd_estimate;
-  const solFee = (cs.solana || {}).fee_usd_estimate;
-  const baseGas = (cs.base || {}).gas_gwei;
-  const ethGas = (cs.ethereum || {}).gas_gwei;
+  // INST-1 R-L1: "Malformed rail entries return a named refusal on both
+  // twins, never an exception." The public picker retains its string/null
+  // contract; details are exposed by pickRecommendedChainResult.
+  const read = (rail, field) => {
+    const entry = cs[rail];
+    if (entry === undefined || entry === null) return { value: null };
+    if (typeof entry !== "object" || Array.isArray(entry)) return { refusal_code: MALFORMED_RAIL_ENTRY };
+    const value = entry[field];
+    if (value === undefined || value === null) return { value: null };
+    if (typeof value !== "number" || !Number.isFinite(value)) return { refusal_code: MALFORMED_RAIL_ENTRY };
+    return { value };
+  };
+  const readings = [
+    read("xrpl", "fee_usd_estimate"), read("solana", "fee_usd_estimate"),
+    read("base", "gas_gwei"), read("ethereum", "gas_gwei"),
+  ];
+  if (readings.some((r) => r.refusal_code)) return null;
+  const [xrplFee, solFee, baseGas, ethGas] = readings.map((r) => r.value);
   if (xrplFee !== null && xrplFee !== undefined && xrplFee < CATO_ULTRA_LOW_FEE_USD) return "xrpl";
   if (solFee !== null && solFee !== undefined && solFee < CATO_ULTRA_LOW_FEE_USD) return "solana";
   if (baseGas !== null && baseGas !== undefined && baseGas < 1) return "base";
@@ -182,7 +199,32 @@ function pickRecommendedChain(chainState) {
   return null;
 }
 
+function pickRecommendedChainResult(chainState) {
+  const cs = chainState || {};
+  for (const rail of ["xrpl", "solana", "base", "ethereum"]) {
+    const entry = cs[rail];
+    if (entry !== undefined && entry !== null &&
+        (typeof entry !== "object" || Array.isArray(entry))) {
+      return { recommended_chain: null, refusal_code: MALFORMED_RAIL_ENTRY, rail };
+    }
+  }
+  const recommended_chain = pickRecommendedChain(cs);
+  if (recommended_chain === null) {
+    const fields = { xrpl: "fee_usd_estimate", solana: "fee_usd_estimate", base: "gas_gwei", ethereum: "gas_gwei" };
+    for (const [rail, field] of Object.entries(fields)) {
+      const value = cs[rail] && cs[rail][field];
+      if (value !== undefined && value !== null &&
+          (typeof value !== "number" || !Number.isFinite(value))) {
+        return { recommended_chain: null, refusal_code: MALFORMED_RAIL_ENTRY, rail };
+      }
+    }
+  }
+  return { recommended_chain, refusal_code: null };
+}
+
 module.exports = {
+  CATO_DOCTRINE_VERSION,
+  MALFORMED_RAIL_ENTRY,
   CATO_OFR_ESCALATE_THRESHOLD,
   CATO_OFR_HOLD_THRESHOLD,
   CATO_GAS_GWEI_HOLD_THRESHOLD,
@@ -196,4 +238,5 @@ module.exports = {
   stressReadingFromObservation,
   computeGateDecision,
   pickRecommendedChain,
+  pickRecommendedChainResult,
 };
