@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0, 7 Nov 2026
+
+- Record the ONB-1 voluntary classification of Cato Sec as a candidate theory-based
+  quantitative method. This is not a regulatory determination.
+
 ## 0.7.0, 26 Oct 2026
 
 - Closed the Cato/Aureon picker and gate drift across the INST-1 4,000-state
