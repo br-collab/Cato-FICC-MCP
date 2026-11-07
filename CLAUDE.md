@@ -6,3 +6,6 @@ Cato Sec is the read-only FICC market-data and tokenized-settlement governance-g
 - **Kernel pin:** none; this repository does not depend on `cannae-kernel`.
 - **Workspace rules:** `../CLAUDE.md` in the Project Cannae Legion workspace.
 - **Reports:** write order reports to the workspace `_reports/` directory.
+## Merge authority
+
+Builders open pull requests. Only Bill merges pull requests or creates tags. Builders must not enable auto-merge.
