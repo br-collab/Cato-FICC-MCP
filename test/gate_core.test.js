@@ -128,7 +128,7 @@ assert.deepStrictEqual(
   pickRecommendedChainResult({ ethereum: { gas_gwei: null } }),
   { recommended_chain: null, refusal_code: null },
 );
-assert.strictEqual(CATO_DOCTRINE_VERSION, "0.7.0");
+assert.strictEqual(CATO_DOCTRINE_VERSION, "0.8.0");
 assert.strictEqual(CATO_DOCTRINE_VERSION, require("../package.json").version);
 
 // Rule under test — ORDER-GR-1 finding 1: "eligibility before cost. A rail
