@@ -12,14 +12,14 @@ determinism alone does not establish the software exclusion in SR 26-2 and OCC B
 > *experimental*, *validated* and *production-qualified*; all five repositories are at
 > the first, and this label changes only when evidence changes it.
 
-**Last updated:** 7 Nov 2026. ONB-1B candidate, package and doctrine version 0.8.1.
+**Last updated:** 7 Nov 2026. Auto-merge authority fix, package and doctrine version 0.8.2.
 
 
 Cato Sec is a Model Context Protocol (MCP) server exposing governed FICC market data
 and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
-v0.8.1. The current research implementation exposes 29 read-only MCP tools and the narrow
+v0.8.2. The current research implementation exposes 29 read-only MCP tools and the narrow
 pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
 vectors plus 5 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
 99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
