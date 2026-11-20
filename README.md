@@ -20,11 +20,12 @@ and on-chain settlement tooling to AI development workflows.
 
 Built with Anthropic's official `@modelcontextprotocol/sdk`. Stdio transport.
 v0.8.3. The current research implementation exposes 29 read-only MCP tools and the narrow
-pure-core compatibility surface documented below. Its measured suite passes **21 doctrine
-vectors plus 5 boundary/claim assertion scripts**; `gate_core.js` measures **69.69% branch,
-99.42% statement, 100% function, and 99.42% line coverage**. It does not submit, route, release,
-or settle a trade; model Value at Risk-based clearing-fund margin, liquidity add-ons, or
-participant-default waterfalls; or erase the two declared Node/Python compatibility gaps.
+pure-core compatibility surface documented below. Its measured suite (`npm test`, 20 Nov 2026)
+passes **25 doctrine vectors plus 7 boundary/claim assertion scripts**; `gate_core.js` measures
+**83.11% branch, 100% statement, 100% function, and 100% line coverage**. It does not submit,
+route, release, or settle a trade; model Value at Risk-based clearing-fund margin, liquidity
+add-ons, or participant-default waterfalls; or erase the one open Node/Python compatibility gap
+declared in `COMPATIBILITY_STATUS.json`.
 
 ## Why "Cato Sec"
 
@@ -285,8 +286,8 @@ so overall production compatibility is not claimed.
   [br-collab/aureon#11](https://github.com/br-collab/aureon/issues/11).
 - **How it is checked.** `parity/run_parity.py` in
   [br-collab/aureon](https://github.com/br-collab/aureon) drives this
-  repository's `gate_core.js` against the twin on 17 golden vectors. All 17
-  pass, and CI fails on any decision difference. The harness runs in CI in both
+  repository's `gate_core.js` against the twin on 21 golden vectors (count
+  checked 20 Nov 2026). All 21 pass, and CI fails on any decision difference. The harness runs in CI in both
   repositories (`.github/workflows/parity.yml`), added in
   [`63addba`](https://github.com/br-collab/Cato-FICC-MCP/commit/63addba7361e30c20d9efab968ae5000a1b81785) here and
   [`810b9b3`](https://github.com/br-collab/aureon/commit/810b9b3459f4f79621b6a3d13b8190939069befe) in aureon. It covers only what the vectors
