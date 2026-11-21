@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.3 - 7 Nov 2026
+
+Remove the obsolete merge-ownership statement so one authority rule remains.
+
+## 0.8.2, 7 Nov 2026
+
+- Allow builders to enable check-gated auto-merge while preserving Bill's sole release authority.
+
+## 0.8.1, 7 Nov 2026
+
+- Clarify merge authority. This documentation release changes no runtime behavior.
+
 ## 0.8.0, 7 Nov 2026
 
 - Record the ONB-1 voluntary classification of Cato Sec as a candidate theory-based
